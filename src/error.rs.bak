@@ -1,0 +1,204 @@
+//! Error types.
+//!
+//! Code used and modified from [matklad/xshell](https://github.com/matklad/xshell/blob/master/src/error.rs)
+
+#![deny(missing_debug_implementations)]
+#![deny(missing_docs)]
+#![deny(rust_2018_idioms)]
+
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    env,
+    ffi::OsString,
+    fmt,
+    io,
+    path::PathBuf,
+    process::ExitStatus,
+    string::FromUtf8Error,
+};
+
+use miette::Diagnostic;
+
+/// `Result` from miette, with the error types defaulting to `pomodoro`'s ['Error`].
+pub type Result<T, E = Error> = miette::Result<T, E>;
+
+/// An error returned by an `pomodoro` operation.
+pub struct Error {
+    kind: Box<ErrorKind>,
+}
+
+/// A builder object for constructing a subprocess.
+///
+/// A [`Cmd`] is usually created with the [`cmd!`] macro. The command exists
+/// within a context of a [`Shell`] and uses its working directory and
+/// environment.
+///
+/// # Example
+///
+/// ```no_run
+/// use xshell::{
+///     cmd,
+///     Shell,
+/// };
+///
+/// let sh = Shell::new()?;
+///
+/// let branch = "main";
+/// let cmd = cmd!(sh, "git switch {branch}").quiet().run()?;
+/// # Ok::<(), xshell::Error>(())
+/// ```
+#[derive(Debug)]
+#[must_use]
+pub struct Cmd<'a> {
+    shell: &'a Shell,
+    data: CmdData,
+}
+
+#[derive(Debug)]
+pub struct Shell {
+    cwd: RefCell<PathBuf>,
+    env: RefCell<HashMap<OsString, OsString>>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct CmdData {
+    prog: PathBuf,
+    args: Vec<OsString>,
+    // env_changes: Vec<EnvChange>,
+    ignore_status: bool,
+    quiet: bool,
+    secret: bool,
+    stdin_contents: Option<Vec<u8>>,
+    ignore_stdout: bool,
+    ignore_stderr: bool,
+}
+
+impl fmt::Display for CmdData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.secret {
+            return write!(f, "<secret>");
+        }
+
+        write!(f, "{}", self.prog.display())?;
+        for arg in &self.args {
+            // TODO: this is potentially not copy-paste safe.
+            let arg = arg.to_string_lossy();
+            if arg.chars().any(|it| it.is_ascii_whitespace()) {
+                write!(f, " \"{}\"", arg.escape_default())?
+            } else {
+                write!(f, " {}", arg)?
+            };
+        }
+        Ok(())
+    }
+}
+
+/// `ErrorKind` enumerates `kind: Box<_>` for `Error`
+/// Note: this is intentionally not public.
+//
+// TODO: Implement ErrorKind enum variants.
+//
+// CurrentDir { err: io::Error },
+// Var { err: env::VarError, var: OsString },
+// ReadFile { err: io::Error, path: PathBuf },
+// ReadDir { err: io::Error, path: PathBuf },
+// WriteFile { err: io::Error, path: PathBuf },
+// CopyFile { err: io::Error, src: PathBuf, dst: PathBuf },
+// HardLink { err: io::Error, src: PathBuf, dst: PathBuf },
+// CreateDir { err: io::Error, path: PathBuf },
+// RemovePath { err: io::Error, path: PathBuf },
+enum ErrorKind {
+    CmdStatus { cmd: CmdData, status: ExitStatus },
+    CmdIo { err: io::Error, cmd: CmdData },
+    CmdUtf8 { err: FromUtf8Error, cmd: CmdData },
+    CmdStdin { err: io::Error, cmd: CmdData },
+}
+
+impl From<ErrorKind> for Error {
+    fn from(kind: ErrorKind) -> Self {
+        let kind = Box::new(kind);
+        Error { kind }
+    }
+}
+// #[macro_export]
+// macro_rules! cmd {
+//     ($sh:expr, $cmd:literal) => {{
+//         #[cfg(trick_rust_analyzer_into_highlighting_interpolated_bits)]
+//         format_args!($cmd);
+//         let f = |prog| $sh.cmd(prog);
+//         let cmd: $crate::Cmd = $crate::__cmd!(f $cmd);
+//         cmd
+//     }};
+// }
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &*self.kind {
+            ErrorKind::CmdStatus { cmd, status } => match status.code() {
+                Some(code) => write!(f, "command exited with non-zero code `{cmd}`: {code}"),
+                #[cfg(unix)]
+                None => {
+                    use std::os::unix::process::ExitStatusExt;
+                    match status.signal() {
+                        Some(sig) => write!(f, "command was terminated by a signal `{cmd}`: {sig}"),
+                        None => write!(f, "command was terminated by a signal `{cmd}`"),
+                    }
+                }
+                #[cfg(not(unix))]
+                None => write!(f, "command was terminalted by a signal `{cmd}`"),
+            },
+            ErrorKind::CmdIo { err, cmd } => {
+                if err.kind() == io::ErrorKind::NotFound {
+                    let prog = cmd.prog.display();
+                    write!(f, "command not found: `{prog}`")
+                } else {
+                    write!(f, "io error when running command `{cmd}`: {err}")
+                }
+            }
+            ErrorKind::CmdUtf8 { err, cmd } => {
+                write!(f, "failed to decode output of command `{cmd}`: {err}")
+            }
+            ErrorKind::CmdStdin { err, cmd } => {
+                write!(f, "failed to write to stdin of command `{cmd}`: {err}")
+            }
+        }?;
+
+        Ok(())
+    }
+}
+
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self, f)
+    }
+}
+
+impl std::error::Error for Error {}
+
+// -------------------------------------------------------------------------
+
+/// `pub(crate)` constructors, visible only in this crate.
+impl Error {
+    pub(crate) fn new_cmd_status(cmd: &Cmd<'_>, status: ExitStatus) -> Error {
+        let cmd = cmd.data.clone();
+        ErrorKind::CmdStatus { cmd, status }.into()
+    }
+
+    pub(crate) fn new_cmd_io(cmd: &Cmd<'_>, err: io::Error) -> Error {
+        let cmd = cmd.data.clone();
+        ErrorKind::CmdIo { err, cmd }.into()
+    }
+
+    pub(crate) fn new_cmd_utf8(cmd: &Cmd<'_>, err: io::Error) -> Error {
+        let cmd = cmd.data.clone();
+        ErrorKind::CmdIo { err, cmd }.into()
+    }
+}
+
+// -------------------------------------------------------------------------
+
+#[test]
+fn should_error_send_sync() {
+    fn f<T: Send + Sync>() {}
+    f::<Error>();
+}
