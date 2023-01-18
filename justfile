@@ -20,7 +20,7 @@ clf:
 
 # Create and serve rustdoc for pomodoro w/o dependecies
 d:
-  cargo d -p pomo-cli -r --no-deps --open
+  cargo d -p pompom -r --no-deps --open
 
 # Default `just` command to list all commands
 default:
@@ -29,21 +29,21 @@ default:
 f:
   cargo fmt
 
-# Run bin in pomo-cli/src/bin/pomo_cli.rs
+# Run bin in pompom/src/bin/pompom.rs
 r:
-  cargo r -p pomo-cli
+  cargo r -p pompom
 
 # Run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 rtrace:
-  RUSTBACKTRACE=1 cargo r -p pomo-cli
+  RUSTBACKTRACE=1 cargo r -p pompom
 
-# Test lib pomo_cli
+# Test lib pompom
 t:
-  cargo test -p pomo-cli
+  cargo test -p pompom
 
-# Watch and Run bin in pomo-cli/src/bin/pomo_cli.rs
+# Watch and Run bin in pompom/src/bin/pompom.rs
 w:
-  cargo watch -x 'r -p pomo-cli'
+  cargo watch -x 'r -p pompom'
 
 # Watch and run to see help cli usage stdout
 whelp:
@@ -51,7 +51,7 @@ whelp:
 
 # Watch and test lib
 wt:
-  cargo watch -x 't -p pomo-cli'
+  cargo watch -x 't -p pompom'
 
 # Watch and pass cli arguments
 wcli:
