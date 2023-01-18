@@ -4,21 +4,36 @@ use clap::{
     Arg,
     Parser,
 };
-use log::info;
 use miette::{
     Context,
     IntoDiagnostic,
 };
-use pompom;
+pub use pompom::{
+    self,
+    PompomConfig,
+};
 
 fn main() {
-    info!("pompom.rs / main()");
-    let config = pompom::PomodoroConfig::try_parse()
+    let config = pompom::PompomConfig::try_parse()
         .into_diagnostic()
         .wrap_err("Failed to parse command line arguments in main");
 
-    if let Err(e) = pompom::run(config) {
-        eprintln!("Application error: {}", e);
-        process::exit(1);
+    let cfg = match config {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("oops: {:?}", e);
+            process::exit(1);
+        }
+    };
+
+    match pompom::run(Ok(cfg)) {
+        Err(e) => {
+            eprintln!("Application error: {}", e);
+            log::error!("Application error: {}", e);
+            process::exit(1);
+        }
+        Ok(_) => {
+            log::info!("Application finished successfully")
+        }
     }
 }
