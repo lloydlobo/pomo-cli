@@ -45,6 +45,10 @@ t:
 w:
   cargo watch -x 'r -p pomo-cli'
 
+# Watch and run to see help cli usage stdout
+whelp:
+  cargo watch -x 'r -- --help'
+
 # Watch and test lib
 wt:
   cargo watch -x 't -p pomo-cli'

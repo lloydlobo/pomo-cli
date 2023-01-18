@@ -7,7 +7,7 @@ pomo_cli is a terminal pomodoro CLI app that vocally reminds you
 while running gracefully in the background.
 """
 homepage = "https://github.com/lloydlobo/pomo_cli"
-authors = ["lloydlobo"]
+author = ["lloydlobo"]
 categories = ["command-line-utilities", "command-line-interface" ]
 keywords = ["cli", "pomodoro", "tasks", "time", "productivity", "terminal"]
 
@@ -20,7 +20,6 @@ exclude = [
 
 [dependencies]
 indicatif = "0.17.3"
-miette = { version = "5.5.0", features = ["fancy"] }
 thiserror = "1.0.38"
 xshell = "0.2.3"
 termcolor = "1.2.0"
@@ -30,10 +29,27 @@ dirs = "4.0.0"
 atty = "0.2.14"
 lazy_static = "1.4.0"
 semver = "1.0.16"
+humantime = "2.1.0"
+humantime-serde = "1.1.1"
+serde_json = "1.0.91"
+chrono = "0.4.23"
+logging_timer = "1.1.0"
 
 [dependencies.clap]
 version = "4.1.1"
 features = ["derive", "suggestions"]
+
+[dependencies.fast_log]
+version = "1.5.51"
+features = ["lz4", "zip", "gzip"]
+
+[dependencies.miette]
+version = "5.5.0"
+features = ["fancy"]
+
+[dependencies.serde]
+version = "1.0.152"
+features = ["derive"]
 
 [dev-dependencies]
 tempfile = "3.3.0"

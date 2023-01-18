@@ -3,6 +3,7 @@
 //! Inspired by [bashbunni: Source](https://gist.github.com/bashbunni/3880e4194e3f800c4c494de286ebc1d7)
 //!
 //! * Requires  spd-say should ship with your distro or install it.
+//! `$ echo "hello world" | spd-say -e -t male3`
 //! * (Optional) Requires [caarlos0/timer](https://github.com/caarlos0/timer).
 //!
 //! # Development
@@ -29,6 +30,9 @@
 
 mod cli;
 mod error;
+mod utils;
+
+pub use utils::*;
 
 // -------------------------------------------------------------------------
 
@@ -45,9 +49,6 @@ use log;
 use miette::{
     Context,
     Diagnostic,
-    IntoDiagnostic,
-    NamedSource,
-    SourceSpan,
 };
 use thiserror::Error;
 use xshell::{
@@ -62,7 +63,7 @@ lazy_static! {
 }
 
 pub const POMO_OPTIONS: [&str; 2] = ["work", "break"];
-pub const MILLIS_IN_ONE_SECOND: u64 = 1000;
+pub const MILLIS_IN_ONE_SECOND: u64 = 10; // Default 1000 ms.
 pub const SECONDS_IN_ONE_MINUTE: u64 = 60;
 // static REPEAT_INTERVALS_NOTIFY: u64 = 5;
 
@@ -90,21 +91,22 @@ impl PomoOptions {
 pub fn pomodoro() -> miette::Result<()> {
     log::info!("{:?}", utils::Tty(atty::Stream::Stdout).are_you_tty());
 
-    let cli_args: cli::CliArgs = match cli::get_user_args_fails() {
+    let cli_args: cli::CliArgs = match cli::get_user_stdin_args() {
         // let cli_args: cli::CliArgs = match cli::get_user_args() {
         Ok(it) => it,
         Err(err) => {
-            // log::error!("cli::get_user_args(): {}", err.error);
-            log::error!("cli::get_user_args(): {}", err);
+            log::error!("cli::get_user_args():\n{:#?}Severity: {:?}", err.src, err.severity());
             return Err(err).wrap_err("Could not get arguments passed in the terminal")?;
         }
     };
     dbg!(&cli_args);
 
-    error_app::some_tool().wrap_err("pomodoro")?;
+    // error_app::some_tool().wrap_err("pomodoro")?;
 
     let sh = Shell::new().expect("should create a new shell");
-    let args: Vec<String> = std::env::args().collect();
+    // let args: Vec<String> = std::env::args().collect();
+    let args: Vec<String> = vec![cli_args.intervals.to_string(), cli_args.task.to_lowercase()];
+    dbg!(&args);
 
     let pomo_user: Option<PomoOptions> = match Some(&args[1]) {
         Some(arg) if arg == POMO_OPTIONS[0] || arg == "wo" => Some(PomoOptions::Work),
@@ -118,6 +120,7 @@ pub fn pomodoro() -> miette::Result<()> {
         },
         None => None,
     };
+
     let progress_duration: u64 = 60 * (&arg_duration_min.as_ref().unwrap()).parse::<u64>().unwrap();
 
     let arg_duration_secs: Option<String> = Some(progress_duration.to_string());
@@ -133,7 +136,7 @@ pub fn pomodoro() -> miette::Result<()> {
     pb.finish_with_message("Time up");
 
     let arg_user_session_done: Option<String> = Some(format!("{} session done", &args[1]));
-    cmd!(sh, "spd-say {arg_user_session_done...}").run().unwrap(); // `$ spd-say "'$val' session done"`
+    cmd!(sh, "spd-say -t female1 {arg_user_session_done...}").run().unwrap(); // `$ spd-say "'$val' session done"`
 
     Ok(())
 }
@@ -166,36 +169,14 @@ fn notify_elapsed_time(sh: &Shell, arg_curr_progress: Option<String>) {
 
 pub struct Cli {
     pomo: String,
-
     break_short: String,
     break_long: String,
-
     duration_pomo: u32,
     duration_break: u32,
-
     task: String,
 }
 
 // -------------------------------------------------------------------------
-
-mod utils {
-    use atty::Stream;
-
-    /// [See also](https://crates.io/crates/atty)
-    pub struct Tty(pub Stream);
-
-    impl Tty {
-        pub fn are_you_tty(self) -> bool {
-            if atty::is(self.0) {
-                println!("I'm a terminal");
-                true
-            } else {
-                println!("I'm not a terminal");
-                false
-            }
-        }
-    }
-}
 
 // -------------------------------------------------------------------------
 

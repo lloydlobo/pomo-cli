@@ -1,8 +1,13 @@
-use pomo_cli::pomodoro;
+use miette::Context;
+use pomo_cli::{
+    clear_terminal,
+    pomodoro,
+};
 use pretty_env_logger::env_logger::Builder;
 
 fn main() -> miette::Result<()> {
-    let mut _builder = enable_logging();
+    clear_terminal().wrap_err("Failed to clear terminal")?;
+    enable_logging();
 
     pomodoro()?;
 

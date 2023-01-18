@@ -6,6 +6,7 @@
 use miette::{
     Diagnostic,
     NamedSource,
+    Report,
     SourceSpan,
 };
 use thiserror::Error;
@@ -36,6 +37,36 @@ pub enum PomoLibError {
 
 // -------------------------------------------------------------------------
 
+/// `CLIParseError` checks for errors while parsing terminal stdin inputs from user.
+///
+/// * miette supports collecting multiple errors into a single diagnostic, and printing them all
+///   together nicely. Use the #[related] tag on any IntoIter field in your Diagnostic type:
+/// * delayed source code Sometimes it makes sense to add source code to the error message later.
+///   One option is to use with_source_code() method for that:
+#[derive(Error, Debug, Diagnostic)]
+#[error("Failed to parse input from stdin terminal")]
+#[diagnostic(
+    code(pomo_cli::cli::CliParseError), // Source code
+    url(docsrs),                        // A link to rustdoc generated docs
+)]
+pub struct CliParseError {
+    /// Source snippets printed to stdout. Can use String if you don't have/care about file names.
+    #[source_code]
+    pub src: NamedSource, // miette will use this.
+    //
+    /// Snippets and highlights can be included in the diagnostic!
+    #[label("This bit here from CliParseError")]
+    pub bad_bit: SourceSpan,
+
+    #[help]
+    pub advice: Option<String>,
+
+    #[related]
+    pub related_error: Option<Report>,
+}
+
+// -------------------------------------------------------------------------
+
 /* /// `Result` from miette, with the error types defaulting to `pomodoro`'s ['Error`].
 pub type Result<T, E = Error> = miette::Result<T, E>;
 
@@ -45,80 +76,3 @@ pub struct Error {
 } */
 
 // -------------------------------------------------------------------------
-
-// -------------------------------------------------------------------------
-
-// TODO: add test to error.rs
-// #[test]
-// fn should_error_send_sync() {
-// fn f<T: Send + Sync>() {}
-// f::<Error>();
-// }
-
-// -------------------------------------------------------------------------
-
-// Code used and modified from [matklad/xshell](https://github.com/matklad/xshell/blob/master/src/error.rs)
-/* /// `ErrorKind` enumerates `kind: Box<_>` for `Error`
-/// Note: this is intentionally not public.
-//
-// TODO: Implement ErrorKind enum variants.
-//
-// CurrentDir { err: io::Error },
-// Var { err: env::VarError, var: OsString },
-// ReadFile { err: io::Error, path: PathBuf },
-// ReadDir { err: io::Error, path: PathBuf },
-// WriteFile { err: io::Error, path: PathBuf },
-// CopyFile { err: io::Error, src: PathBuf, dst: PathBuf },
-// HardLink { err: io::Error, src: PathBuf, dst: PathBuf },
-// CreateDir { err: io::Error, path: PathBuf },
-// RemovePath { err: io::Error, path: PathBuf },
-enum ErrorKind {
-    CmdStatus { cmd: CmdData, status: ExitStatus },
-    CmdIo { err: io::Error, cmd: CmdData },
-    CmdUtf8 { err: FromUtf8Error, cmd: CmdData },
-    CmdStdin { err: io::Error, cmd: CmdData },
-}
-
-impl From<ErrorKind> for Error {
-    fn from(kind: ErrorKind) -> Self {
-        let kind = Box::new(kind);
-        Error { kind }
-    }
-}
-// #[macro_export]
-// macro_rules! cmd {
-//     ($sh:expr, $cmd:literal) => {{
-//         #[cfg(trick_rust_analyzer_into_highlighting_interpolated_bits)]
-//         format_args!($cmd);
-//         let f = |prog| $sh.cmd(prog);
-//         let cmd: $crate::Cmd = $crate::__cmd!(f $cmd);
-//         cmd
-//     }};
-// } */
-//
-//
-/* impl fmt::Debug for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(self, f)
-    }
-}
-
-impl std::error::Error for Error {} */
-
-/* /// `pub(crate)` constructors, visible only in this crate.
-impl Error {
-    pub(crate) fn new_cmd_status(cmd: &Cmd<'_>, status: ExitStatus) -> Error {
-        let cmd = cmd.data.clone();
-        ErrorKind::CmdStatus { cmd, status }.into()
-    }
-
-    pub(crate) fn new_cmd_io(cmd: &Cmd<'_>, err: io::Error) -> Error {
-        let cmd = cmd.data.clone();
-        ErrorKind::CmdIo { err, cmd }.into()
-    }
-
-    pub(crate) fn new_cmd_utf8(cmd: &Cmd<'_>, err: io::Error) -> Error {
-        let cmd = cmd.data.clone();
-        ErrorKind::CmdIo { err, cmd }.into()
-    }
-} */
