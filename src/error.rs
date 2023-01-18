@@ -4,12 +4,15 @@
 //!`thiserror` is a great way to define them, and plays nicely with `miette`!
 
 use miette::{
+    Context,
     Diagnostic,
     NamedSource,
     Report,
     SourceSpan,
 };
 use thiserror::Error;
+
+use crate::cli;
 
 // -------------------------------------------------------------------------
 
@@ -33,6 +36,10 @@ pub enum PomoLibError {
     #[error("Could not parse arguments from stdin")]
     #[diagnostic(code(pomo_cli::cli::CliParseError))]
     BadThingHappened,
+
+    #[error("Invalid args passed in stdin")]
+    #[diagnostic(code(pomo_cli::cli::CliParseError))]
+    InvalidArgs(#[from] self::CliParseError),
 }
 
 // -------------------------------------------------------------------------
@@ -76,3 +83,22 @@ pub struct Error {
 } */
 
 // -------------------------------------------------------------------------
+
+pub fn handle_invalid_user_args(cli_args: &cli::CliArgs) {
+    let advice = "try `pomo_cli --task work --interval 4`\nor `pomo_cli -t break -i 1`";
+    if let Some(t) = Some(&cli_args.task) {
+        match t.as_str() {
+            "work" | "wo" | "break" | "br" => (),
+            _ => {
+                Err(PomoLibError::InvalidArgs(CliParseError {
+                    src: NamedSource::new("cli.rs", format!("{:#?}", cli_args)),
+                    bad_bit: (7..11).into(), // (9, 4).into()
+                    advice: Some(format!("{}", advice)),
+                    related_error: Some(miette::Report::msg(" Invalid pomodoro option")),
+                }))
+                .wrap_err(advice)
+                .unwrap()
+            }
+        }
+    }
+}

@@ -32,10 +32,6 @@ mod cli;
 mod error;
 mod utils;
 
-pub use utils::*;
-
-// -------------------------------------------------------------------------
-
 #[macro_use]
 extern crate lazy_static;
 
@@ -44,6 +40,7 @@ use std::{
     time::Duration,
 };
 
+use error::PomoLibError;
 use indicatif::ProgressBar;
 use log;
 use miette::{
@@ -51,10 +48,18 @@ use miette::{
     Diagnostic,
 };
 use thiserror::Error;
+pub use utils::*;
 use xshell::{
     cmd,
     Shell,
 };
+
+use crate::error::{
+    handle_invalid_user_args,
+    CliParseError,
+};
+
+// -------------------------------------------------------------------------
 
 // -------------------------------------------------------------------------
 
@@ -88,25 +93,29 @@ impl PomoOptions {
 // -------------------------------------------------------------------------
 
 // TODO: Handle error when user passed arg is None, or not one of opts;
-pub fn pomodoro() -> miette::Result<()> {
-    log::info!("{:?}", utils::Tty(atty::Stream::Stdout).are_you_tty());
+pub fn pomodoro() -> miette::Result<(), PomoLibError> {
+    log::info!(
+        "pomodoro: Tty(..).are_you_tty(): {:#?}",
+        utils::Tty(atty::Stream::Stdout).are_you_tty()
+    );
 
     let cli_args: cli::CliArgs = match cli::get_user_stdin_args() {
         // let cli_args: cli::CliArgs = match cli::get_user_args() {
         Ok(it) => it,
         Err(err) => {
             log::error!("cli::get_user_args():\n{:#?}Severity: {:?}", err.src, err.severity());
-            return Err(err).wrap_err("Could not get arguments passed in the terminal")?;
+            return Err(err).wrap_err("Could not get arguments passed in the terminal").unwrap();
         }
     };
-    dbg!(&cli_args);
+    log::debug!("{:#?}", &cli_args);
+    handle_invalid_user_args(&cli_args);
 
     // error_app::some_tool().wrap_err("pomodoro")?;
 
     let sh = Shell::new().expect("should create a new shell");
     // let args: Vec<String> = std::env::args().collect();
     let args: Vec<String> = vec![cli_args.intervals.to_string(), cli_args.task.to_lowercase()];
-    dbg!(&args);
+    log::debug!("args: {:#?}", &args);
 
     let pomo_user: Option<PomoOptions> = match Some(&args[1]) {
         Some(arg) if arg == POMO_OPTIONS[0] || arg == "wo" => Some(PomoOptions::Work),

@@ -8,10 +8,10 @@ pub struct Tty(pub Stream);
 impl Tty {
     pub fn are_you_tty(self) -> bool {
         if atty::is(self.0) {
-            println!("I'm a terminal");
+            log::info!("{:#?}: I'm a terminal", self.0);
             true
         } else {
-            println!("I'm not a terminal");
+            log::info!("{:#?} I'm not a terminal", self.0);
             false
         }
     }
