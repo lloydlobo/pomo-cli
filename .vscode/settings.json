@@ -2,6 +2,7 @@
     "editor.tabCompletion": "on",
     "diffEditor.codeLens": true,
     "cSpell.words": [
+        "chrono",
         "crossterm",
         "humantime",
         "longbreak",

@@ -36,6 +36,12 @@ pub enum NotificationError {
     DeletionFail(String),
 }
 
+impl From<NotifyRustError> for NotificationError {
+    fn from(v: NotifyRustError) -> Self {
+        Self::Desktop(v)
+    }
+}
+
 impl fmt::Display for NotificationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
