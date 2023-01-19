@@ -1,59 +1,15 @@
-//! # pompom
-//!
-//! This crate is a simple pomodoro cli based terminal timer.
-//!
-//! # Dependencies
-//!
-//! * Works on Linux and MacOS. Currently unimplemented for Windows except for WSL.
-// TODO: Install `libdbus-1` to integrate pompom with linux's notification system.
-//! # Installation
-//!
-//! Works both on stable and nightly rust.
-//!
-//! Install the application with the command:
-//!
-//! *Stable*
-//! ```terminal
-//! $ cargo install pompom
-//! ```
-//!
-//! *Nightly*
-//! ```terminal
-//! $ cargo +nightly install pompom
-//! ```
-//! # Using pompom
-//!
-//! Run pompom directly in your terminal. It currently defaults to:
-//! * 25 minutes of work time.
-//! * 5 minutes of break.
-//! * 20 minutes of long break.
-//!
-//! ```terminal
-//! $ pompom
-//! ```
-//!
-//! # Flags
-//!
-//! To customize the pompom settings, you can pass flags into the terminal.
-//! * `-w` | `--work` - sets the work time.
-//! * `-s` | `--shortbreak` - sets the short break time.
-//! * `-l` | `--longbreak` - sets the long break time.
-//!
-//! # Examples
-//!
-//! ```terminal
-//! $ pompom -w 45 -s 15 -l 25
-//! ```
-//!
-//! ```terminal
-//! $ pompom --work 45 --shortbreak 15 --longbreak 25
-//! ```
-
+#![doc(html_logo_url = "https://raw.githubusercontent.com/lloydlobo/pompom/main/assets/pompom.png")]
+#![doc = include_str!("../README.md")]
+#![forbid(unsafe_code)]
+//
+// Code copied and slightly modified from [PrismaPhonic/Pomodoro](https://github.com/PrismaPhonic/Pomodoro/blob/master/src/lib.rs).
 use std::{
     ffi::OsString,
     io::{
         self,
         stdin,
+        Read,
+        Stdin,
         Write,
     },
     time::Instant,
@@ -94,6 +50,7 @@ use miette::{
     Diagnostic,
     NamedSource,
     Report,
+    Result,
     SourceSpan,
 };
 use pretty_env_logger::env_logger::Builder;
@@ -105,7 +62,7 @@ use thiserror::Error;
 
 //------------------------------------------------------
 
-pub fn run(config: miette::Result<PompomConfig>) -> miette::Result<()> {
+pub fn run(config: Result<PompomConfig>) -> Result<()> {
     // ! Disable pretty_env_log Builder this when in production!!!!
     let mut builder = Builder::from_env("RUST_LOG");
     builder
@@ -121,7 +78,7 @@ pub fn run(config: miette::Result<PompomConfig>) -> miette::Result<()> {
     let instant_now: Instant = Instant::now();
     let cmd = config.as_ref().unwrap();
 
-    if cmd.command == Some(Commands::Interactive) || cmd.command == Some(Commands::I) {
+    if cmd.command == Some(CliCommands::Interactive) || cmd.command == Some(CliCommands::I) {
         run_tui(config)?;
     } else {
         run_cli(config)?;
@@ -130,8 +87,285 @@ pub fn run(config: miette::Result<PompomConfig>) -> miette::Result<()> {
     println!("\nDone in {:?}!\nGoodbye!", instant_now.elapsed());
     Ok(())
 }
+#[derive(Debug, Subcommand, PartialEq)]
+pub enum CliCommands {
+    /// Usage: $ pompom interactive
+    #[command(arg_required_else_help = false)]
+    Interactive,
 
-fn load_spinner(time: Option<std::time::Duration>) -> miette::Result<()> {
+    /// Usage: $ pompom interactive
+    #[command(arg_required_else_help = false)]
+    I,
+}
+
+const DEFAULT_WORK_TIME: u64 = 15;
+const DEFAULT_SHORT_BREAK_TIME: u64 = 5;
+const DEFAULT_LONG_BREAK_TIME: u64 = 25;
+
+/// `pompom` CLI terminal flags with settings.
+// [See](https://github.com/clap-rs/clap/blob/master/examples/git-derive.rs)
+#[derive(Parser, Debug)] // requires `derive` feature
+#[command(name = "pompom")]
+#[command(author, version, about, long_about = None, term_width=0)]
+pub struct PompomConfig {
+    #[command(subcommand)]
+    command: Option<CliCommands>,
+
+    /// Sets the length of work time period in minutes.
+    #[arg(short = 'w', long = "work", default_value_t = DEFAULT_WORK_TIME)]
+    work_time: u64,
+
+    /// Sets the length of short break in minutes after each work period elapses.
+    #[arg(short = 's', long = "shortbreak", default_value_t = DEFAULT_SHORT_BREAK_TIME)]
+    short_break_time: u64,
+
+    /// Sets the length of long break in minutes after all work period completes.
+    #[arg(short = 'l', long = "longbreak", default_value_t = DEFAULT_LONG_BREAK_TIME)]
+    long_break_time: u64,
+}
+impl Default for PompomConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl PompomConfig {
+    pub fn new() -> Self {
+        Self {
+            command: None,
+            work_time: DEFAULT_WORK_TIME,
+            short_break_time: DEFAULT_SHORT_BREAK_TIME,
+            long_break_time: DEFAULT_LONG_BREAK_TIME,
+        }
+    }
+}
+
+pub struct PomodoroSession<R, W> {
+    stdin: R,
+    stdout: W,
+    width: u16,
+    height: u16,
+    pompom_tracker: TrackerState,
+    clock: Clock,
+    config: PompomConfig,
+}
+
+// impl<R, W> Fn for PomodoroSession<R, W> {
+// }
+
+// [See also](https://doc.rust-lang.org/error_codes/E0277.html)
+impl<R, W> Read for PomodoroSession<R, W>
+where
+    R: Read,
+    W: Write,
+{
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.stdin.read(buf)
+    }
+}
+/*
+
+fn()->Stdin{stding}:std::io::Read;
+
+error[E0599]: the method `start` exists for struct `PomodoroSession<fn() -> Stdin {stdin}, Stdout>`, but its trait bounds were not satisfied
+   --> src/lib.rs:419:19
+    |
+169 | pub struct PomodoroSession<R, W> {
+    | -------------------------------- method `start` not found for this struct
+...
+419 |     pompom_screen.start();
+    |                   ^^^^^ method cannot be called on `PomodoroSession<fn() -> Stdin {stdin}, Stdout>` due to unsatisfied trait bounds
+    |
+note: trait bound `fn() -> Stdin {stdin}: std::io::Read` was not satisfied
+   --> src/lib.rs:202:8
+    |
+200 | impl<R, W> PomodoroSession<R, W>
+    |            ---------------------
+201 | where
+202 |     R: Read,
+    |        ^^^^ unsatisfied trait bound introduced here
+
+
+
+*/
+
+// impl<R: std::ops::Deref, W: std::ops::Deref> std::ops::Deref for PomodoroSession<R, W> {
+//     type Target = R;
+
+//     fn deref(&self) -> &Self::Target {
+//         &self.stdin
+//     }
+// }
+impl<R, W> PomodoroSession<R, W>
+where
+    R: Read,
+    W: Write,
+{
+    pub fn start(&mut self) {
+        write!(self.stdout, "{}", cursor::Hide);
+        self.display_menu(Some(POMPOM_PROMPT_START));
+    }
+
+    pub fn display_menu(&mut self, menu: Option<&'static str>) {
+        let menu = if let Some(menu) = menu { menu } else { POMPOM_MENU };
+        match self.wait_for_next_command() {
+            Command::Start => self.begin_cycle(),
+            Command::Quit => return,
+            Command::Reset | Command::None => (),
+        }
+    }
+
+    /// Wats for the next user command while in a loop.
+    /// User command occurs between various `PompomState` pomodoro states.
+    // self.stdin.read_exact(&mut buf).unwrap()
+    fn wait_for_next_command(&mut self) -> Command {
+        let mut command = Command::None;
+
+        while let Command::None = command {
+            let mut buf = [0];
+            self.stdin.read(&mut buf).unwrap();
+            command = match buf[0] {
+                b's' => Command::Start,
+                b'r' => Command::Reset,
+                b'q' => Command::Quit,
+                _ => continue,
+            }
+        }
+
+        command
+    }
+
+    fn begin_cycle(&mut self) {
+        self.start_work();
+        self.display_menu(None);
+    }
+
+    fn start_work(&mut self) {
+        self.pompom_tracker.set_work_state();
+        self.clock.set_time_minutes(self.config.work_time);
+        self.countdown();
+    }
+
+    fn countdown(&mut self) {
+        todo!()
+    }
+}
+
+/// `Command` enumerates command types matched to user keystrokes.
+pub enum Command {
+    Start,
+    Reset,
+    Quit,
+    None,
+}
+
+/// `PompomState` enumerates `pompom`'s pomodoro state.
+#[derive(Debug)]
+enum PompomState {
+    Working,
+    ShortBreak,
+    LongBreak,
+    None,
+}
+
+/// Clock structure that displays minutes and seconds,
+/// while drawing border around current time.
+#[derive(Debug, Default)]
+pub struct Clock {
+    minutes: u64,
+    seconds: u64,
+}
+
+impl Clock {
+    /// Creates a new [`Clock`] instance at `00:00`.
+    pub fn new() -> Self {
+        Self { minutes: 0u64, seconds: 0u64 }
+    }
+
+    pub fn get_time(&self) -> String {
+        format!("{:02}:{:02}", self.minutes, self.seconds)
+    }
+
+    /// # Examples
+    ///
+    /// ```
+    /// use pompom::Clock;
+    /// # fn main() {
+    /// let clock = Clock::default();
+    /// let clock_display = clock.gen_clock("Hello, world!");
+    /// let expect = r#"
+    /// ╭───────────────────────────────────────╮
+    /// │                                       │
+    /// │             Hello, world!             │
+    /// │                 00:00                 │
+    /// │                                       │
+    /// ╰───────────────────────────────────────╯
+    /// "#;
+    /// assert_eq!(clock_display, expect);
+    /// let clock_display = clock.gen_clock("Hello");
+    /// let expect = r#"
+    /// ╭───────────────────────────────────────╮
+    /// │                                       │
+    /// │             Hello             │
+    /// │                 00:00                 │
+    /// │                                       │
+    /// ╰───────────────────────────────────────╯
+    /// "#;
+    /// assert_eq!(clock_display, expect);
+    /// # }
+    /// ```
+    pub fn gen_clock(&self, message: &str) -> String {
+        let clock_display = format!(
+            "
+╭───────────────────────────────────────╮
+│                                       │
+│             {}             │
+│                 {}                 │
+│                                       │
+╰───────────────────────────────────────╯
+",
+            message,
+            self.get_time()
+        );
+
+        clock_display
+    }
+
+    /// Sets absolute milliseconds for the clock's time.
+    fn set_time_ms(&mut self, ms: u64) {
+        self.minutes = (ms / (1_000 * 60)) % 60;
+        self.seconds = (ms / 1_000) % 60;
+    }
+
+    /// Sets absolute minutes for the clock's time.
+    fn set_time_minutes(&mut self, minutes: u64) {
+        self.set_time_ms(minutes * 60_000_u64)
+    }
+}
+
+/// * Tracks various [`PompomState`] from `Working` to `None`, ('1' to '4 or None'). `None` state
+///   indicates that first pompom timer state hasn't started yer.
+/// * Tracks the instant when the current `pompom` was started at. `started_instant` - None between
+///   pomodoros.
+#[derive(Debug)]
+pub struct TrackerState {
+    current_order: Option<u32>,
+    current_state: PompomState,
+    started_instant: Option<Instant>,
+}
+
+impl TrackerState {
+    pub fn new() -> Self {
+        Self { current_order: None, current_state: PompomState::None, started_instant: None }
+    }
+
+    fn set_work_state(&self) {
+        todo!()
+    }
+}
+
+//------------------------------------------------------
+
+fn load_spinner(time: Option<std::time::Duration>) -> Result<()> {
     let time = if let Some(t) = time { t } else { std::time::Duration::from_millis(2000) };
     let message = format!("pompom starting in {} seconds", time.as_millis() / 1000);
 
@@ -140,8 +374,61 @@ fn load_spinner(time: Option<std::time::Duration>) -> miette::Result<()> {
     Ok::<(), Report>(sp.stop()).wrap_err("Failed to stop spinner")
 }
 
-fn run_cli(config: Result<PompomConfig, Report>) -> Result<(), Report> {
-    log::info!("{:#?}", config.unwrap());
+/// Run `pompom`'s pomodoro session from start to finish.
+///
+/// # Panics
+///
+/// Panics if .
+///
+/// # Errors
+///
+/// This function will return an error if .
+fn run_cli(config: Result<PompomConfig, Report>) -> Result<(), PompomError> {
+    log::info!("{:#?}", config.as_ref().unwrap());
+    let mut stdout = io::stdout();
+    let (width, height) = buffer_size()?;
+    // let config = config.unwrap();
+
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+
+    terminal::enable_raw_mode()?;
+    queue!(
+        stdout,
+        style::ResetColor,
+        terminal::Clear(ClearType::All),
+        cursor::Hide,
+        cursor::MoveTo(1u16, 1u16)
+    )?;
+    stdout.flush()?;
+
+    let mut pompom_screen = PomodoroSession {
+        stdin,
+        stdout,
+        width,
+        height,
+        pompom_tracker: TrackerState::new(),
+        clock: Clock::new(),
+        config: config.unwrap_or(PompomConfig::default()),
+    };
+
+    //? Should this be queue or execute?
+    queue!(pompom_screen.stdout, terminal::Clear(ClearType::All), cursor::MoveTo(1u16, 1u16))?;
+    pompom_screen.stdout.flush()?;
+
+    // pompom_screen.start();
+
+    // execute!(
+    //     stdout,
+    //     style::ResetColor,
+    //     cursor::MoveTo(1u16, 1u16),
+    //     terminal::Clear(ClearType::All),
+    //     cursor::Show,
+    //     DisableMouseCapture,
+    //     terminal::LeaveAlternateScreen
+    // )?;
+
+    terminal::disable_raw_mode()?;
+
     Ok(())
 }
 
@@ -153,45 +440,8 @@ fn run_tui(config: Result<PompomConfig, Report>) -> Result<(), Report> {
     Ok(())
 }
 
-#[derive(Debug, Subcommand, PartialEq)]
-pub(crate) enum Commands {
-    /// Usage: $ pompom interactive
-    #[command(arg_required_else_help = false)]
-    Interactive,
-
-    /// Usage: $ pompom interactive
-    #[command(arg_required_else_help = false)]
-    I,
-    // /// Interactive OsString Vector
-    // #[command(external_subcommand)]
-    // Interactive(Vec<OsString>),
-}
-
-/// `pompom` CLI terminal flags with settings.
-// [See](https://github.com/clap-rs/clap/blob/master/examples/git-derive.rs)
-#[derive(Parser, Debug)] // requires `derive` feature
-#[command(name = "pompom")]
-#[command(author, version, about, long_about = None, term_width=0)]
-pub struct PompomConfig {
-    #[command(subcommand)]
-    command: Option<Commands>,
-
-    /// Sets the length of work time period in minutes.
-    #[arg(short = 'w', long = "work", default_value = "25")]
-    work_time: u64,
-
-    /// Sets the length of short break in minutes after each work period elapses.
-    #[arg(short = 's', long = "shortbreak", default_value = "5")]
-    short_break_time: u64,
-
-    /// Sets the length of long break in minutes after all work period completes.
-    #[arg(short = 'l', long = "longbreak", default_value = "20")]
-    long_break_time: u64,
-}
-
 //------------------------------------------------------
 
-// Code copied and slightly modified from [PrismaPhonic/Pomodoro](https://github.com/PrismaPhonic/Pomodoro/blob/master/src/lib.rs).
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,18 +499,9 @@ static SOUND: &'static str = "Ping";
 #[cfg(all(unix, not(target_os = "macos")))]
 static SOUND: &'static str = "alarm-clock-elapsed";
 
-const DEFAULT_WORK_TIME: u64 = 15;
-const DEFAULT_SHORT_BREAK_TIME: u64 = 5;
-const DEFAULT_LONG_BREAK_TIME: u64 = 25;
-
 //------------------------------------------------------
 
-fn init<W>(
-    stdout: &mut W,
-    width: u16,
-    height: u16,
-    config: PompomConfig,
-) -> miette::Result<(), PompomError>
+fn init<W>(stdout: &mut W, width: u16, height: u16, config: PompomConfig) -> Result<(), PompomError>
 where
     W: Write,
 {
@@ -330,7 +571,7 @@ where
     Ok(())
 }
 
-pub fn buffer_size() -> miette::Result<(u16, u16), PompomError> {
+pub fn buffer_size() -> Result<(u16, u16), PompomError> {
     Ok(terminal::size()?)
 }
 

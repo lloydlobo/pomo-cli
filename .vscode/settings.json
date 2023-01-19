@@ -1,7 +1,16 @@
 {
     "editor.tabCompletion": "on",
     "diffEditor.codeLens": true,
-    "cSpell.words": ["humantime", "miette", "pomo", "pomodoro", "rustdoc", "thiserror"],
+    "cSpell.words": [
+        "humantime",
+        "longbreak",
+        "miette",
+        "pomo",
+        "pomodoro",
+        "rustdoc",
+        "shortbreak",
+        "thiserror"
+    ],
     "editor.tokenColorCustomizations": {
         "comments": "",
         "textMateRules": [

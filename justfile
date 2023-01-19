@@ -29,9 +29,13 @@ default:
 f:
   cargo fmt
 
-# Run bin in pompom/src/bin/pompom.rs
+# Run bin from pompom/src/bin/pompom.rs
 r:
   cargo r -p pompom
+
+# Run bin from pompom/src/bin/pompom.rs in release mode
+rr:
+  cargo r -r -p pompom
 
 # Run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 rtrace:
