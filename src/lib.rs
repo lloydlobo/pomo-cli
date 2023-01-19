@@ -66,6 +66,10 @@ use spinners::{
     Spinners,
 };
 use thiserror::Error;
+use xshell::{
+    cmd,
+    Shell,
+};
 
 //------------------------------------------------------
 
@@ -412,50 +416,68 @@ fn load_spinner(time: Option<std::time::Duration>) -> Result<()> {
 ///
 /// This function will return an error if .
 fn run_cli(config: Result<PompomConfig, Report>) -> Result<(), PompomError> {
-    log::info!("{:#?}", config.as_ref().unwrap());
-    let mut stdout = io::stdout();
-    let (width, height) = buffer_size()?;
-    // let config = config.unwrap();
+    let sh: Shell = Shell::new().unwrap();
+    let mut stdout: io::Stdout = io::stdout();
+    let (width, height): (u16, u16) = buffer_size()?;
 
-    execute!(&mut stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    {
+        let _d = sh.push_dir("./target");
+        let cwd: std::path::PathBuf = sh.current_dir();
+        cmd!(sh, "echo current dir is {cwd}").run().unwrap();
+        let process_cwd: std::path::PathBuf = std::env::current_dir().unwrap();
+        assert_eq!(cwd, process_cwd.join("./target"));
+        // log::info!("{:#?}", config.as_ref().unwrap());
+    }
+    {
+        execute!(&mut stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        terminal::enable_raw_mode()?;
+        // queue!( &mut stdout, style::ResetColor, terminal::Clear(ClearType::All), cursor::Hide
+        // ,cursor::MoveTo(1u16, 1u16))?;
+        // stdout.flush()?;
 
-    terminal::enable_raw_mode()?;
-    queue!(
-        &mut stdout,
-        style::ResetColor,
-        terminal::Clear(ClearType::All),
-        cursor::Hide,
-        cursor::MoveTo(1u16, 1u16)
-    )?;
-    stdout.flush()?;
+        let pompom_screen = PomodoroSession {
+            stdin,
+            stdout: &mut stdout,
+            width,
+            height,
+            pompom_tracker: TrackerState::new(),
+            clock: Clock::new(),
+            config: config.unwrap_or(PompomConfig::default()),
+        };
+        queue!(pompom_screen.stdout, terminal::Clear(ClearType::All), cursor::MoveTo(1u16, 1u16))?;
+        pompom_screen.stdout.flush()?;
+        // pompom_screen.start();
 
-    let pompom_screen = PomodoroSession {
-        stdin,
-        stdout: &mut stdout,
-        width,
-        height,
-        pompom_tracker: TrackerState::new(),
-        clock: Clock::new(),
-        config: config.unwrap_or(PompomConfig::default()),
-    };
+        {
+            let mut clock = pompom_screen.clock;
+            let time = pompom_screen.config.work_time;
+            clock.set_time_minutes(time);
+            info!("{}", clock.get_time());
 
-    //? Should this be queue or execute?
-    queue!(pompom_screen.stdout, terminal::Clear(ClearType::All), cursor::MoveTo(1u16, 1u16))?;
-    pompom_screen.stdout.flush()?;
+            let cmd_time = Some(format!("Set {} for work session", time.to_string()));
+            cmd!(sh, "spd-say {cmd_time...}").run().unwrap();
 
-    // pompom_screen.start();
+            let pb = indicatif::ProgressBar::new(time * 60);
+            for _ in 0..time * 60 {
+                pb.inc(1);
+                std::thread::sleep(std::time::Duration::from_millis(10))
+            }
+            let cmd_sh_spd_say = Some(format!("work session of {} minutes over", time));
+            cmd!(sh, "spd-say {cmd_sh_spd_say...}").run().unwrap();
+            pb.finish_with_message("session over");
+        }
 
-    execute!(
-        stdout,
-        style::ResetColor,
-        cursor::MoveTo(1u16, 1u16),
-        terminal::Clear(ClearType::All),
-        cursor::Show,
-        DisableMouseCapture,
-        terminal::LeaveAlternateScreen
-    )?;
-
-    terminal::disable_raw_mode()?;
+        execute!(
+            stdout,
+            style::ResetColor,
+            cursor::MoveTo(1u16, 1u16),
+            terminal::Clear(ClearType::All),
+            cursor::Show,
+            DisableMouseCapture,
+            terminal::LeaveAlternateScreen
+        )?;
+        terminal::disable_raw_mode()?;
+    }
 
     Ok(())
 }
