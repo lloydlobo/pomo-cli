@@ -22,6 +22,11 @@ use clap::{
     Parser,
     Subcommand,
 };
+use clap_verbosity_flag::{
+    InfoLevel,
+    LogLevel,
+    Verbosity,
+};
 use crossterm::{
     cursor,
     event::{
@@ -64,16 +69,9 @@ use thiserror::Error;
 
 //------------------------------------------------------
 
-pub fn run(config: Result<PompomConfig>) -> Result<()> {
+pub fn run(mut config: Result<PompomConfig>) -> Result<()> {
     // ! Disable pretty_env_log Builder this when in production!!!!
-    let mut builder = Builder::from_env("RUST_LOG");
-    builder
-        .filter(None, log::LevelFilter::Info)
-        .filter_level(log::LevelFilter::Debug)
-        .format_indent(Some(4))
-        .format_module_path(true)
-        .write_style(pretty_env_logger::env_logger::WriteStyle::Always)
-        .init();
+    build_env_logger(&mut config.as_mut().unwrap())?;
 
     load_spinner(None)?;
 
@@ -89,7 +87,27 @@ pub fn run(config: Result<PompomConfig>) -> Result<()> {
     println!("\nDone in {:?}!\nGoodbye!", instant_now.elapsed());
     Ok(())
 }
-#[derive(Debug, Subcommand, PartialEq)]
+
+fn build_env_logger(cli: &mut PompomConfig) -> Result<()> {
+    let mut builder = Builder::from_env("RUST_LOG");
+    builder
+        .filter(None, log::LevelFilter::Info)
+        .filter_level(cli.verbose.log_level_filter())
+        .filter_level(log::LevelFilter::Debug)
+        .format_indent(Some(4))
+        .format_module_path(true)
+        .write_style(pretty_env_logger::env_logger::WriteStyle::Always)
+        .init();
+
+    log::error!("Engines exploded");
+    log::warn!("Engines smoking");
+    log::info!("Engines exist");
+    log::debug!("Engine temperature is 200 degrees");
+    log::trace!("Engine subsection is 300 degrees");
+
+    Ok(())
+}
+#[derive(Debug, Subcommand, PartialEq, Clone)]
 pub enum CliCommands {
     /// Usage: $ pompom interactive
     #[command(arg_required_else_help = false)]
@@ -106,12 +124,19 @@ const DEFAULT_LONG_BREAK_TIME: u64 = 25;
 
 /// `pompom` CLI terminal flags with settings.
 // [See](https://github.com/clap-rs/clap/blob/master/examples/git-derive.rs)
-#[derive(Parser, Debug)] // requires `derive` feature
+#[derive(Parser, Debug, Clone)] // requires `derive` feature
 #[command(name = "pompom")]
 #[command(author, version, about, long_about = None, term_width=0)]
 pub struct PompomConfig {
     #[command(subcommand)]
     command: Option<CliCommands>,
+
+    /// By default, this will only report errors.
+    /// - `-q` silences output
+    /// - `-v` show warnings - `-vv` show info - `-vvv` show debug - `-vvvv` show trace
+    /// `verbose: Verbosity::new(1, 0),` -> show warnings , output not silenced.
+    #[clap(flatten)]
+    verbose: clap_verbosity_flag::Verbosity,
 
     /// Sets the length of work time period in minutes.
     #[arg(short = 'w', long = "work", default_value_t = DEFAULT_WORK_TIME)]
@@ -137,6 +162,7 @@ impl PompomConfig {
             work_time: DEFAULT_WORK_TIME,
             short_break_time: DEFAULT_SHORT_BREAK_TIME,
             long_break_time: DEFAULT_LONG_BREAK_TIME,
+            verbose: Verbosity::new(1, 0),
         }
     }
 }

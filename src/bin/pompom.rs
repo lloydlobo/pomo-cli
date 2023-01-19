@@ -14,7 +14,7 @@ pub use pompom::{
 };
 
 fn main() {
-    let config = pompom::PompomConfig::try_parse()
+    let mut config = pompom::PompomConfig::try_parse()
         .into_diagnostic()
         .wrap_err("Failed to parse command line arguments in main");
 
