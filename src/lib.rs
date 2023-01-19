@@ -417,11 +417,11 @@ fn run_cli(config: Result<PompomConfig, Report>) -> Result<(), PompomError> {
     let (width, height) = buffer_size()?;
     // let config = config.unwrap();
 
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(&mut stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
     terminal::enable_raw_mode()?;
     queue!(
-        stdout,
+        &mut stdout,
         style::ResetColor,
         terminal::Clear(ClearType::All),
         cursor::Hide,
@@ -429,9 +429,9 @@ fn run_cli(config: Result<PompomConfig, Report>) -> Result<(), PompomError> {
     )?;
     stdout.flush()?;
 
-    let mut pompom_screen = PomodoroSession {
+    let pompom_screen = PomodoroSession {
         stdin,
-        stdout,
+        stdout: &mut stdout,
         width,
         height,
         pompom_tracker: TrackerState::new(),
@@ -445,15 +445,15 @@ fn run_cli(config: Result<PompomConfig, Report>) -> Result<(), PompomError> {
 
     // pompom_screen.start();
 
-    // execute!(
-    //     stdout,
-    //     style::ResetColor,
-    //     cursor::MoveTo(1u16, 1u16),
-    //     terminal::Clear(ClearType::All),
-    //     cursor::Show,
-    //     DisableMouseCapture,
-    //     terminal::LeaveAlternateScreen
-    // )?;
+    execute!(
+        stdout,
+        style::ResetColor,
+        cursor::MoveTo(1u16, 1u16),
+        terminal::Clear(ClearType::All),
+        cursor::Show,
+        DisableMouseCapture,
+        terminal::LeaveAlternateScreen
+    )?;
 
     terminal::disable_raw_mode()?;
 

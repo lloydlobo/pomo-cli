@@ -1,9 +1,6 @@
 use std::process;
 
-use clap::{
-    Arg,
-    Parser,
-};
+use clap::Parser;
 use miette::{
     Context,
     IntoDiagnostic,
@@ -14,11 +11,10 @@ pub use pompom::{
 };
 
 fn main() {
-    let mut config = pompom::PompomConfig::try_parse()
+    let cfg = match pompom::PompomConfig::try_parse()
         .into_diagnostic()
-        .wrap_err("Failed to parse command line arguments in main");
-
-    let cfg = match config {
+        .wrap_err("Failed to parse command line arguments in main")
+    {
         Ok(t) => t,
         Err(e) => {
             eprintln!("oops: {:?}", e);
