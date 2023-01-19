@@ -3,15 +3,18 @@
 )]
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
+
+pub mod error;
+pub mod notification;
+
 //
 // Code copied and slightly modified from [PrismaPhonic/Pomodoro](https://github.com/PrismaPhonic/Pomodoro/blob/master/src/lib.rs).
+// Code copied and slightly modified from [24seconds/rust-cli-pomodoro](https://github.com/24seconds/rust-cli-pomodoro).
+//
 use std::{
-    ffi::OsString,
     io::{
         self,
-        stdin,
         Read,
-        Stdin,
         Write,
     },
     time::Instant,
@@ -22,11 +25,7 @@ use clap::{
     Parser,
     Subcommand,
 };
-use clap_verbosity_flag::{
-    InfoLevel,
-    LogLevel,
-    Verbosity,
-};
+use clap_verbosity_flag::Verbosity;
 use crossterm::{
     cursor,
     event::{
@@ -41,17 +40,13 @@ use crossterm::{
     execute,
     queue,
     style,
-    style::Print,
     terminal::{
         self,
         ClearType,
         EnterAlternateScreen,
     },
 };
-use log::{
-    debug,
-    info,
-};
+use log::info;
 use miette::{
     Context,
     Diagnostic,
@@ -69,6 +64,11 @@ use thiserror::Error;
 use xshell::{
     cmd,
     Shell,
+};
+
+pub use self::{
+    error::*,
+    notification::*,
 };
 
 //------------------------------------------------------
@@ -174,8 +174,8 @@ impl PompomConfig {
 pub struct PomodoroSession<R, W> {
     stdin: R,
     stdout: W,
-    width: u16,
-    height: u16,
+    _width: u16,
+    _height: u16,
     pompom_tracker: TrackerState,
     clock: Clock,
     config: PompomConfig,
@@ -233,12 +233,12 @@ where
     W: Write,
 {
     pub fn start(&mut self) {
-        write!(self.stdout, "{}", cursor::Hide);
+        write!(self.stdout, "{}", cursor::Hide).unwrap();
         self.display_menu(Some(POMPOM_PROMPT_START));
     }
 
     pub fn display_menu(&mut self, menu: Option<&'static str>) {
-        let menu = if let Some(menu) = menu { menu } else { POMPOM_MENU };
+        let _menu = if let Some(menu) = menu { menu } else { POMPOM_MENU };
         match self.wait_for_next_command() {
             Command::Start => self.begin_cycle(),
             Command::Quit => return,
@@ -293,10 +293,10 @@ pub enum Command {
 /// `PompomState` enumerates `pompom`'s pomodoro state.
 #[derive(Debug)]
 enum PompomState {
-    Working,
-    ShortBreak,
-    LongBreak,
-    None,
+    _Working,
+    _ShortBreak,
+    _LongBreak,
+    _None,
 }
 
 /// Clock structure that displays minutes and seconds,
@@ -380,14 +380,15 @@ impl Clock {
 ///   pomodoros.
 #[derive(Debug)]
 pub struct TrackerState {
-    current_order: Option<u32>,
-    current_state: PompomState,
-    started_instant: Option<Instant>,
+    _current_order: Option<u32>,
+    _current_state: PompomState,
+    _started_instant: Option<Instant>,
 }
 
 impl TrackerState {
     pub fn new() -> Self {
-        Self { current_order: None, current_state: PompomState::None, started_instant: None }
+        // Self { current_order: None, current_state: PompomState::None, started_instant: None }
+        todo!()
     }
 
     fn set_work_state(&self) {
@@ -455,15 +456,15 @@ fn run_tui(config: Result<PompomConfig, Report>) -> Result<(), Report> {
 
 //------------------------------------------------------
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
 
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+//     #[test]
+//     fn it_works() {
+//         assert_eq!(2 + 2, 4);
+//     }
+// }
 
 //------------------------------------------------------
 
@@ -492,7 +493,7 @@ pub const CONTROLS: &'static str = "
  r    ~ reset all
 ";
 
-const TEST_MENU: &str = r#"Crossterm interactive test
+pub const TEST_MENU: &str = r#"Crossterm interactive test
 Controls:
  - 'q' - quit interactive test (or return to this menu)
  - any other key - continue with next step
@@ -506,15 +507,20 @@ Select test to run ('1', '2', ...) or hit 'q' to quit.
 
 /// Active clock ping sound.
 #[cfg(target_os = "macos")]
-static SOUND: &'static str = "Ping";
+pub static SOUND: &'static str = "Ping";
 
 /// Active clock ping sound.
 #[cfg(all(unix, not(target_os = "macos")))]
-static SOUND: &'static str = "alarm-clock-elapsed";
+pub static SOUND: &'static str = "alarm-clock-elapsed";
 
 //------------------------------------------------------
 
-fn init<W>(stdout: &mut W, width: u16, height: u16, config: PompomConfig) -> Result<(), PompomError>
+fn init<W>(
+    stdout: &mut W,
+    _width: u16,
+    _height: u16,
+    _config: PompomConfig,
+) -> Result<(), PompomError>
 where
     W: Write,
 {
@@ -642,7 +648,7 @@ pub struct CliParseError {
 /// `cargo run --example event-match-modifiers`
 //
 // Event::FocusGained | Event::FocusLost | Event::Mouse(_) | Event::Paste(_) | Event::Resize(..)
-fn match_event(read_event: Event) {
+fn _match_event(read_event: Event) {
     match read_event {
         // Match on one modifier:
         Event::Key(KeyEvent { modifiers: KeyModifiers::CONTROL, code, .. }) => {
@@ -685,7 +691,7 @@ fn match_event(read_event: Event) {
 
 //------------------------------------------------------
 
-fn print_new_work_time_queue<W>(stdout: &mut W) -> Result<(), PompomError>
+fn _print_new_work_time_queue<W>(stdout: &mut W) -> Result<(), PompomError>
 where
     W: Write,
 {
