@@ -1,4 +1,6 @@
-#![doc(html_logo_url = "https://raw.githubusercontent.com/lloydlobo/pompom/main/assets/pompom.png")]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/lloydlobo/pompom/main/assets/pompom_logo_dark.png"
+)]
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 //
