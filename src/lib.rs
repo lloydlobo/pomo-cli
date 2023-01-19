@@ -92,6 +92,8 @@ pub fn run(mut config: Result<PompomConfig>) -> Result<()> {
     Ok(())
 }
 
+//------------------------------------------------------
+
 fn build_env_logger(cli: &mut PompomConfig) -> Result<()> {
     let mut builder = Builder::from_env("RUST_LOG");
     builder
@@ -111,6 +113,9 @@ fn build_env_logger(cli: &mut PompomConfig) -> Result<()> {
 
     Ok(())
 }
+
+//------------------------------------------------------
+
 #[derive(Debug, Subcommand, PartialEq, Clone)]
 pub enum CliCommands {
     /// Usage: $ pompom interactive
