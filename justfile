@@ -39,7 +39,7 @@ r:
   cargo r -p pompom
 
 # Run bin cli with `interactive` command from pompom/src/bin/pompom.rs
-r-i:
+ri:
   cargo r -p pompom i
 
 # Run bin from pompom/src/bin/pompom.rs in release mode

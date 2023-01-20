@@ -18,7 +18,9 @@ use clap::{
 };
 use clap_verbosity_flag::Verbosity;
 use dialoguer::{
+    console::Style,
     theme::ColorfulTheme,
+    Confirm,
     Input,
 };
 use error::{
@@ -34,8 +36,6 @@ use xshell::{
     Shell,
 };
 
-pub struct Cli {}
-
 pub async fn run(mut cli: PomoFocusCli) -> miette::Result<()> {
     if let Some(arg) = match &cli.command {
         Some(cmd) => match cmd {
@@ -44,16 +44,9 @@ pub async fn run(mut cli: PomoFocusCli) -> miette::Result<()> {
         None => None,
     } {
         cli.work_time = arg.work_time as u64;
-        cli.short_break_time = arg.break_time as u64;
+        cli.short_break_time = arg.short_break_time as u64;
     }
-
     let _res = run_timer(cli).await.map(|_| ()).map_err(|_| NotificationError::Desktop);
-
-    // match res { Ok(v) => Ok(v), Err(_) if Notification::new() .summary("Pompom")
-    // .body(&format!("oops{:?}", res.ok())) .hint(Hint::Urgency(Urgency::Critical)) .show()
-    // .map_err(|_| NotificationError::Desktop) .is_ok() => { Ok(()) }     Err(_) =>
-    // Err(miette::Report::msg("Pompom")), }
-
     Ok(())
 }
 
@@ -81,15 +74,12 @@ async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
         std::thread::sleep(interval);
     });
     pb.finish_with_message("Pomodoro finished! Take a break!");
-
-    // let args: Vec<String> = vec![cli_args.intervals.to_string(), cli_args.task.to_lowercase()];
     {
         let args = vec!["5", "5"];
         let arg_user_session_done: Option<String> = Some(format!("{} session done", &args[1]));
         cmd!(sh, "spd-say -t female1 {arg_user_session_done...}").run().unwrap();
         // `$ spd-say "'$val' session done"`
     }
-    // handle_notifications().await;
     {
         let work_expired_at = created_at + Duration::minutes(cli.work_time as i64);
         let break_expired_at = work_expired_at + Duration::minutes(cli.short_break_time as i64);
@@ -98,7 +88,8 @@ async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
             id,
             description: String::from("Work session over"),
             work_time: cli.work_time as u16,
-            break_time: cli.short_break_time as u16,
+            short_break_time: cli.short_break_time as u16,
+            long_break_time: cli.long_break_time as u16,
             created_at,
             work_expired_at,
             break_expired_at,
@@ -108,23 +99,27 @@ async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
             appname: "pompom",
         };
 
-        let mut notification = Notification::new();
-        let notification = notification
-            .summary(&args.description)
-            .body(&args.body)
-            .icon(args.icon)
-            .appname(args.appname)
-            .hint(Hint::Category("timer".to_owned())) // remove?
-            .hint(Hint::Resident(true)) // this is not supported by all implementations
-            .timeout(notify_rust::Timeout::Milliseconds(args.timeout)); // this however is
-
-        #[cfg(target_os = "linux")]
-        notification
-            .hint(Hint::Category("im.received".to_owned()))
-            .sound_name("message-new-instant");
-        notification.show().map(|_| ()).map_err(NotificationError::Desktop)
+        notify_desktop(args)
     }
 }
+
+fn notify_desktop(args: NotificationManager) -> Result<(), NotificationError> {
+    let mut notification = Notification::new();
+    let notification = notification
+        .summary(&args.description)
+        .body(&args.body)
+        .icon(args.icon)
+        .appname(args.appname)
+        .hint(Hint::Category("timer".to_owned())) // remove?
+        .hint(Hint::Resident(true)) // this is not supported by all implementations
+        .timeout(notify_rust::Timeout::Milliseconds(args.timeout));
+    // this however is
+
+    #[cfg(target_os = "linux")]
+    notification.hint(Hint::Category("im.received".to_owned())).sound_name("message-new-instant");
+    notification.show().map(|_| ()).map_err(NotificationError::Desktop)
+}
+
 #[derive(Debug, Subcommand, PartialEq, Clone)]
 pub enum CliCommands {
     /// Usage: $ pompom interactive
@@ -193,7 +188,8 @@ pub struct NotificationManager {
     id: u16,
     description: String,
     work_time: u16,
-    break_time: u16,
+    short_break_time: u16,
+    long_break_time: u16,
     created_at: DateTime<Utc>,
     work_expired_at: DateTime<Utc>,
     break_expired_at: DateTime<Utc>,
@@ -207,14 +203,21 @@ pub struct NotificationManager {
 // TODO: Return or modify or parse Cli clap args.
 pub fn dialoguer_main(cli: &PomoFocusCli) -> miette::Result<NotificationManager> {
     let created_at: DateTime<Utc> = Utc::now();
+
+    let theme =
+        ColorfulTheme { values_style: Style::new().yellow().dim(), ..ColorfulTheme::default() };
+    println!("Welcome to the setup wizard");
+
     let id = 1;
     let work_expired_at = created_at + Duration::minutes(cli.work_time as i64);
     let break_expired_at = work_expired_at + Duration::minutes(cli.short_break_time as i64);
+
     let mut args = NotificationManager {
         id,
         description: String::from("Work session over"),
         work_time: cli.work_time as u16,
-        break_time: cli.short_break_time as u16,
+        short_break_time: cli.short_break_time as u16,
+        long_break_time: cli.long_break_time as u16,
         created_at,
         work_expired_at,
         break_expired_at,
@@ -224,62 +227,25 @@ pub fn dialoguer_main(cli: &PomoFocusCli) -> miette::Result<NotificationManager>
         appname: "pompom",
     };
 
-    let work_time: u16 = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Enter work time")
-        .interact()
-        .unwrap();
-    let break_time: u16 = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Enter break time")
-        .interact()
-        .unwrap();
+    args.work_time = Input::with_theme(&theme).with_prompt("Enter work time").interact().unwrap();
 
-    args.work_time = work_time;
-    args.break_time = break_time;
+    if Confirm::with_theme(&theme)
+        .with_prompt("Do you want to edit break times?")
+        .interact()
+        .unwrap()
+    {
+        args.short_break_time = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Enter short break time")
+            .interact()
+            .unwrap();
+        args.long_break_time = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Enter long break time")
+            .interact()
+            .unwrap();
+        // return Ok(None);
+    }
 
     Ok(args)
-}
-
-pub fn dialoguer_main_bak() {
-    let input: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Your name")
-        .interact_text()
-        .unwrap();
-
-    println!("Hello {}!", input);
-
-    let mail: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Your email")
-        .validate_with({
-            let mut force = None;
-            move |input: &String| -> Result<(), &str> {
-                if input.contains('@') || force.as_ref().map_or(false, |old| old == input) {
-                    Ok(())
-                } else {
-                    force = Some(input.clone());
-                    Err("This is not a mail address; type the same value again to force use")
-                }
-            }
-        })
-        .interact_text()
-        .unwrap();
-
-    println!("Email: {}", mail);
-
-    let mail: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Your planet")
-        .default("Earth".to_string())
-        .interact_text()
-        .unwrap();
-
-    println!("Planet: {}", mail);
-
-    let mail: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Your galaxy")
-        .with_initial_text("Milky Way".to_string())
-        .interact_text()
-        .unwrap();
-
-    println!("Galaxy: {}", mail);
 }
 
 /// `$ spd-say "'$val' session done"`
@@ -295,69 +261,37 @@ fn notify_elapsed_time(sh: &Shell, arg_curr_progress: Option<String>) {
 
 //-----------------------------------------------------------------------------
 
-// #[derive(Debug, Clone)]
-// struct NotifyArgs {
-//     summary: &'static str,
-//     body: &'static str,
-//     icon: &'static str,
-//     /// In milliseconds
-//     timeout: u32,
-//     appname: &'static str,
-//     hint_category: Hint,
-//     hint_resident: Hint,
-// }
+#[allow(unused)]
+mod tbd {
+    fn spinner() {
+        let spinner = indicatif::ProgressBar::new_spinner();
+        let interval = std::time::Duration::from_millis(1000);
+        spinner.enable_steady_tick(interval);
+        println!("Feedback: How was your work session?");
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+        spinner.finish();
+        log::debug!("{:?}", spinner.elapsed());
+    }
 
-// async fn handle_notifications() {
-//     let args = NotifyArgs {
-//         summary: "reminder",
-//         body: "time over",
-//         icon: "alarm",
-//         timeout: 5000,
-//         appname: "pompom",
-//         hint_category: Hint::Category("pomodoro".to_owned()),
-//         hint_resident: Hint::Resident(true),
-//     };
+    fn get_feedback() {
+        if let Some(rv) = dialoguer::Editor::new().edit("The work session was ...").unwrap() {
+            println!("{}", rv);
+        } else {
+            println!("Abort!");
+        }
+    }
 
-//     notify(&args).await.unwrap();
-//     notify_persistent(&args).await.unwrap();
-//     let args = NotifyArgs {
-//         summary: "Category:email",
-//         body: r#"This has nothing to do with emails. It should not go away until you acknowledge
-// it."#,         icon: "email",
-//         timeout: 0,
-//         appname: "thunderbird",
-//         hint_category: Hint::Category("email".to_owned()), /* this is not supported by all
-//                                                             * implementations */
-//         hint_resident: Hint::Resident(true), // this however is
-//     };
-//     notify(&args).await.unwrap();
-//     notify_persistent(&args).await.unwrap();
-// }
-
-// async fn notify(args: &NotifyArgs) -> NotifyResult {
-//     let mut notification = Notification::new();
-//     let notification = notification
-//         .summary(args.summary)
-//         .body(args.body)
-//         .appname(args.appname)
-//         .icon(args.icon)
-//         .timeout(notify_rust::Timeout::Milliseconds(args.timeout));
-
-//     #[cfg(target_os = "linux")]
-//     notification.hint(Hint::Category("im.received".to_owned())).sound_name("message-new-instant"
-// );     notification.show().map(|_| ()).map_err(NotificationError::Desktop)
-// }
-
-// async fn notify_persistent(args: &NotifyArgs) -> NotifyResult {
-//     let mut notification = Notification::new();
-//     let notification = notification
-//         .summary(args.summary)
-//         .body(args.body)
-//         .icon(args.icon)
-//         .appname(args.appname)
-//         .hint(args.hint_category.clone())
-//         .hint(args.hint_resident.clone()) // this is not supported by all implementations
-//         .timeout(notify_rust::Timeout::Milliseconds(args.timeout)); // this however is
-
-//     notification.show().map(|_| ()).map_err(NotificationError::Desktop)
-// }
+    fn get_default_editor() -> std::ffi::OsString {
+        if let Some(prog) = std::env::var_os("VISUAL") {
+            return prog;
+        }
+        if let Some(prog) = std::env::var_os("EDITOR") {
+            return prog;
+        }
+        if cfg!(windows) {
+            "notepad.exe".into()
+        } else {
+            "vi".into()
+        }
+    }
+}
