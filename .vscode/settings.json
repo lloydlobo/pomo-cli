@@ -12,6 +12,7 @@
         "miette",
         "pomo",
         "pomodoro",
+        "pomodoros",
         "rustdoc",
         "shortbreak",
         "thiserror"

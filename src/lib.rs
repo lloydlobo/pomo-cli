@@ -26,15 +26,129 @@ use dialoguer::{
 use error::{
     NotificationError,
     NotifyResult,
+    PomodoroError,
 };
 use notify_rust::{
     Hint,
     Notification,
 };
+use termcolor::{
+    BufferWriter,
+    Color,
+    ColorChoice,
+    ColorSpec,
+    StandardStream,
+    WriteColor,
+};
 use xshell::{
     cmd,
     Shell,
 };
+
+#[derive(Debug, Clone)]
+enum PomofocusState {
+    Work,
+    ShortBreak,
+    LongBreak,
+    /// Default session state between other states.
+    None,
+}
+
+/// intervals = 3
+/// work state 1
+/// short break state
+/// work state 2
+/// short break state
+/// work state 3
+/// long break state
+#[derive(Debug)]
+struct StateManager {
+    state: PomofocusState,
+    counter: Option<u16>,
+    max_count: Option<u16>,
+}
+
+impl StateManager {
+    fn new() -> Self {
+        type Item = PomofocusState;
+
+        Self { state: PomofocusState::Work, counter: None, max_count: Some(3) }
+    }
+    fn next(&mut self) {
+        let next_state = match self.state {
+            PomofocusState::Work => PomofocusState::ShortBreak,
+            PomofocusState::ShortBreak => PomofocusState::Work,
+            PomofocusState::LongBreak => PomofocusState::Work,
+            PomofocusState::None => PomofocusState::Work,
+        };
+        self.state = next_state;
+    }
+    fn get_state(&mut self) -> PomofocusState {
+        self.state.to_owned()
+    }
+    fn next_counter(&mut self) {
+        self.counter = Some(self.counter.unwrap_or(0) + 1);
+        self.next();
+    }
+    fn reset_counter(&mut self) {
+        self.counter = None;
+    }
+    fn state_message(&self) -> Result<String, Box<dyn std::error::Error>> {
+        match self.state {
+            PomofocusState::Work => {
+                let msg = "💪🏻";
+                printer::CliPrinter::new(Some(msg)).write_green()?;
+                Ok(String::from(msg))
+            }
+            PomofocusState::ShortBreak => {
+                let msg = "💤🏻";
+                printer::CliPrinter::new(Some(msg)).write_yellow()?;
+                Ok(String::from(msg))
+            }
+            PomofocusState::LongBreak => {
+                let msg = "💤🏻💤🏻💤🏻";
+                printer::CliPrinter::new(Some(msg)).write_red()?;
+                Ok(String::from(msg))
+            }
+            PomofocusState::None => Ok(String::new()),
+        }
+    }
+    fn run(&mut self) -> miette::Result<&mut StateManager> {
+        // let mut manager = StateManager::new();
+        // let mut manager = StateManager::new();
+        // let mut shell = Shell::new();
+        // let mut notification = Notification::new() .summary("Pomofocus") .body("")
+        // .timeout(std::time::Duration::from_secs(5));
+
+        'l: loop {
+            let state = self.get_state();
+            let _counter = self.counter.unwrap_or(0);
+            #[rustfmt::skip]
+            let message = match state {
+                PomofocusState::Work => {// notification .body(&format!("Work {}", counter)) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus Work", "Work") .run()?;
+                    "Work"
+                }
+                PomofocusState::ShortBreak => {// notification .body(&format!("Short Break {}", counter)) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus Short Break", "Short Break") .run()?;
+                    "Short Break"
+                }
+                PomofocusState::LongBreak => {// notification .body(&format!("Long Break {}", counter)) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus Long Break", "Long Break") .run()?;
+                    "Long Break"
+                }
+                PomofocusState::None => {// notification .body(&format!("No Pomofocus")) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus No Pomofocus", "No Pomofocus") .run()?;
+                    "No Pomofocus"
+                }
+            };
+            self.next_counter();
+            println!("{}", message);
+            if self.counter == self.max_count {
+                break 'l;
+            }
+
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        Ok(self)
+    }
+}
 
 pub async fn run(mut cli: PomoFocusCli) -> miette::Result<()> {
     if let Some(arg) = match &cli.command {
@@ -67,6 +181,8 @@ async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
         true => Some(format!("{} minutes over", i / 60)),
         false => None,
     };
+
+    // Main pomodoro progress loop!
     (0..len_duration).for_each(|i: u64| {
         pb.inc(1);
         // TODO: Move conditional here to avoid invoking notification for `None` cases.
@@ -74,6 +190,7 @@ async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
         std::thread::sleep(interval);
     });
     pb.finish_with_message("Pomodoro finished! Take a break!");
+
     {
         let args = vec!["5", "5"];
         let arg_user_session_done: Option<String> = Some(format!("{} session done", &args[1]));
@@ -292,6 +409,76 @@ mod tbd {
             "notepad.exe".into()
         } else {
             "vi".into()
+        }
+    }
+}
+
+#[allow(unused)]
+pub mod printer {
+    use std::{
+        io,
+        io::{
+            BufRead,
+            BufReader,
+            Read,
+            Write,
+        },
+    };
+
+    use termcolor::{
+        BufferWriter,
+        Color,
+        ColorChoice,
+        ColorSpec,
+        StandardStream,
+        WriteColor,
+    };
+
+    // TODO: Add stdio stdout feature.
+    // pub struct CliPrinter<W:Write,R:Read>(W,R);
+    #[derive(Debug, Default)]
+    pub struct CliPrinter {
+        msg: &'static str,
+        stdin: Option<StandardStream>,
+        stdout: Option<StandardStream>,
+        bufwtr: Option<BufferWriter>,
+        /// Write colored text to memory.
+        bufmem: Option<termcolor::Buffer>,
+    }
+
+    impl CliPrinter {
+        pub fn new(msg: Option<&'static str>) -> Self {
+            Self {
+                msg: if let Some(s) = msg { s } else { "" },
+                stdin: None,
+                stdout: None,
+                bufwtr: None,
+                bufmem: None,
+            }
+        }
+        pub fn write_green(&mut self) -> io::Result<()> {
+            let mut stdout = StandardStream::stdout(ColorChoice::Always);
+            stdout.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
+            writeln!(&mut stdout, "{0}", self.msg)
+        }
+
+        pub fn write_green_buf(&mut self) -> io::Result<()> {
+            let mut bufwtr = BufferWriter::stderr(ColorChoice::Always);
+            let mut buffer = bufwtr.buffer();
+            buffer.set_color(ColorSpec::new().set_fg(Some(Color::Green)))?;
+            writeln!(&mut buffer, "{0}", self.msg)?;
+            bufwtr.print(&buffer)
+        }
+
+        pub fn write_yellow(&mut self) -> io::Result<()> {
+            let mut stdout = StandardStream::stdout(ColorChoice::Always);
+            stdout.set_color(ColorSpec::new().set_fg(Some(Color::Yellow)))?;
+            writeln!(&mut stdout, "{0}", self.msg)
+        }
+        pub fn write_red(&mut self) -> io::Result<()> {
+            let mut stdout = StandardStream::stdout(ColorChoice::Always);
+            stdout.set_color(ColorSpec::new().set_fg(Some(Color::Red)))?;
+            writeln!(&mut stdout, "{0}", self.msg)
         }
     }
 }
