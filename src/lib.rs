@@ -7,50 +7,17 @@
 
 mod error;
 
-use std::{
-    error::Error,
-    f32::consts::E,
-};
+use std::{error::Error, f32::consts::E};
 
-use chrono::{
-    DateTime,
-    Duration,
-    Utc,
-};
-use clap::{
-    command,
-    Parser,
-    Subcommand,
-};
+use chrono::{DateTime, Duration, Utc};
+use clap::{command, Parser, Subcommand};
 use clap_verbosity_flag::Verbosity;
-use dialoguer::{
-    console::Style,
-    theme::ColorfulTheme,
-    Confirm,
-    Input,
-};
-use error::{
-    NotificationError,
-    NotifyResult,
-    PomodoroError,
-};
+use dialoguer::{console::Style, theme::ColorfulTheme, Confirm, Input};
+use error::{NotificationError, NotifyResult, PomodoroError};
 use miette::Diagnostic;
-use notify_rust::{
-    Hint,
-    Notification,
-};
-use termcolor::{
-    BufferWriter,
-    Color,
-    ColorChoice,
-    ColorSpec,
-    StandardStream,
-    WriteColor,
-};
-use xshell::{
-    cmd,
-    Shell,
-};
+use notify_rust::{Hint, Notification};
+use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+use xshell::{cmd, Shell};
 
 #[derive(Debug)]
 pub struct App {
@@ -60,7 +27,8 @@ pub struct App {
 
 impl App {
     pub fn new(cli: PomoFocusCli) -> Self {
-        let mut state_manager = StateManager::new();
+        let mut state_manager =
+            StateManager::new(PomofocusState::None).with_counter(None).with_max_count(Some(3));
         state_manager.max_count = Some(cli.cycles);
 
         Self { cli, state_manager }
@@ -89,19 +57,24 @@ impl App {
     async fn run_timer_sequence(&mut self) -> NotifyResult {
         // let m = &mut self.state_manager;
         let cycles_requested: u16 = self.cli.cycles;
+        dbg!(&self.cli);
         dbg!(&cycles_requested);
         let mut counter = 0;
-        for i in (1..=cycles_requested) {
+        // while !self.state_manager.is_state_longbreak() {
+        while counter < cycles_requested {
+            // for i in (1..=cycles_requested) {
             // dbg!(&m.get_state());
             // dbg!(m.check_next_state());
             // let curr_state = m.get_state();
             &mut self.state_manager.set_next_state();
-            &mut self.state_manager.next_counter();
+            // &mut self.state_manager.next_counter();
 
             match &mut &mut self.state_manager.get_state() {
                 PomofocusState::Work => {
                     let work_time = self.cli.work_time;
                     Self::prog(work_time);
+                    &mut self.state_manager.next_counter();
+                    counter += 1;
                 }
                 PomofocusState::ShortBreak => {
                     let work_time = self.cli.short_break_time;
@@ -111,17 +84,16 @@ impl App {
                     let work_time = self.cli.long_break_time;
                     Self::prog(work_time);
                 }
-                PomofocusState::None => {
-                    if self.state_manager.state == PomofocusState::LongBreak {
-                        &mut self.state_manager.reset();
-                        &mut self.state_manager.reset_counter();
-                        // break;
-                    }
-                }
+                PomofocusState::None => {}
             }
-            counter += i;
-            dbg!(&self.cli);
+            if self.state_manager.state == PomofocusState::LongBreak {
+                &mut self.state_manager.reset();
+                &mut self.state_manager.reset_counter();
+                // break;
+            }
+            // counter += i;
             dbg!(&mut self.state_manager);
+            // }
         }
         dbg!(&counter);
         dbg!(&mut self.state_manager);
@@ -178,7 +150,8 @@ async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
     // Main pomodoro progress loop!
     (0..len_duration).for_each(|i: u64| {
         pb.inc(1);
-        // TODO: Move conditional here to avoid invoking notification for `None` cases.
+        // TODO: Move conditional here to avoid invoking notification for `None`
+        // cases.
         notify_elapsed_time(&sh, if_elapsed_spd_say(&i));
         std::thread::sleep(duration_sec);
     });
@@ -222,6 +195,12 @@ pub enum PomofocusState {
     None,
 }
 
+impl Default for PomofocusState {
+    fn default() -> Self {
+        PomofocusState::None
+    }
+}
+
 /// intervals = 3
 /// work state 1
 /// short break state
@@ -229,6 +208,19 @@ pub enum PomofocusState {
 /// short break state
 /// work state 3
 /// long break state
+///
+/// * Builder Lite pattern: Call site
+/// ```
+/// use pompom::*;
+/// let state_manager = StateManager::new(PomofocusState::None)
+///     .with_counter(None) // default: `None`
+///     .with_max_count(Some(3)); // default: `Some(3)`
+/// assert_eq!(state_manager.state, PomofocusState::None);
+/// assert_eq!(state_manager.counter, None);
+/// assert_eq!(state_manager.max_count, Some(3));
+/// let state_manager = StateManager::default();
+/// assert_eq!(state_manager.state, PomofocusState::None);
+/// ```
 #[derive(Debug)]
 pub struct StateManager {
     pub state: PomofocusState,
@@ -236,60 +228,43 @@ pub struct StateManager {
     pub max_count: Option<u16>,
 }
 
-/* pub fn manage_state(&mut self) {
-    let state = &mut self.state;
-    let counter = &mut self.counter;
-    let max_count = self.max_count;
-    /*
-     * max_count by default = 3 // 3 occurrences of PomofocusState::Work
-     * self.new(); // Default state is PomofocusState::None
-     *   (counter, state) = (None, PomofocusState:None)
-     *
-     * If the next state is PomofocusState::Work then increase counter.
-     * If the counter is set, then we are in a session.
-     * self.next()
-     * self.next_counter() -> counter += 1u8
-     * PomofocusState::None => PomofocusState::Work,
-     *   (counter, state) = (Some(0), PomofocusState:Work)
-     *
-     * Now work timer elapses
-     * self.next()
-     * self.next_counter() -> counter += 0u8;
-     *   PomofocusState::Work => PomofocusState::ShortBreak,
-     *   (counter, state) = (Some(0), PomofocusState:ShortBreak)
-     *
-     * Now short break timer elapses
-     * self.next_counter() -> counter += 1u8
-     * self.next();
-     *   (counter, state) = (Some(1), PomofocusState:Work)
-     *
-     * Now work timer elapses
-     * self.next()
-     * self.next_counter() -> counter += 0u8;
-     *   PomofocusState::Work => PomofocusState::ShortBreak,
-     *   (counter, state) = (Some(1), PomofocusState:ShortBreak)
-     *
-     * Now short break timer elapses
-     * self.next_counter() -> counter += 1u8
-     * self.next();
-     *   (counter, state) = (Some(2), PomofocusState:Work)
-     *
-     * !Max count has been reached [0, 1, 2].count() = 3;
-     * So time for LongBreak
-     * Now work timer elapses
-     * self.next()
-     * self.next_counter() -> counter += 0u8;
-     *   PomofocusState::Work => PomofocusState::LongBreak, // unpresentable state. have to do manually for now.
-     *   (counter, state) = (Some(2), PomofocusState:LongBreak)
-     *
-     * Reset State
-     * self.reset()
-     *   (counter, state) = (None, PomofocusState:None)
-     *
+impl Default for StateManager {
+    fn default() -> Self {
+        Self { state: Default::default(), counter: None, max_count: Some(3) }
+    }
+}
 
-    */
-} */
+// Call site
+//  let state_manager = StateManager::new(PomofocusState::None)
+//      .with_counter(None)
+//      .with_max_count(Some(3));
+
+/// # Builder Lite pattern
+///
+/// ```ignore
+/// struct StateManager { pub state: PomofocusState, pub counter: Option<u16>, pub max_count: Option<u16>, }
+/// impl StateManager {
+///     pub fn new(state: PomofocusState) -> Self { Self { state, counter:None, max_count:None, } }
+///     pub fn with_counter(mut self, counter: Option<u16>) -> Self { self.counter = counter; self }
+///     pub fn with_max_count(mut self, max_count: Option<u16>) -> Self { self.max_count = max_count; self }
+/// }
+/// // Call site
+/// let state_manager = StateManager::new(PomofocusState::None).with_counter(None).with_max_count(Some(3));
+/// ```
 impl StateManager {
+    pub fn new(state: PomofocusState) -> Self {
+        Self { state, counter: None, max_count: None }
+    }
+
+    pub fn with_counter(mut self, counter: Option<u16>) -> Self {
+        self.counter = counter;
+        self
+    }
+
+    pub fn with_max_count(mut self, max_count: Option<u16>) -> Self {
+        self.max_count = max_count;
+        self
+    }
     fn check_next_state(&mut self) -> PomofocusState {
         let next_state = match self.state {
             PomofocusState::Work => PomofocusState::ShortBreak,
@@ -307,16 +282,17 @@ impl StateManager {
         match self.get_state() {
             PomofocusState::LongBreak => true,
             _ => false,
-            // PomofocusState::LongBreak => { self.state = PomofocusState::None; }
-            // _ => {}
-            // PomofocusState::Work | PomofocusState::ShortBreak | PomofocusState::None => todo!(),
+            // PomofocusState::LongBreak => { self.state = PomofocusState::None;
+            // } _ => {}
+            // PomofocusState::Work | PomofocusState::ShortBreak |
+            // PomofocusState::None => todo!(),
         }
     }
 
-    fn new() -> Self {
-        type Item = PomofocusState;
-        Self { state: PomofocusState::None, counter: None, max_count: Some(3) }
-    }
+    // fn new() -> Self {
+    //     type Item = PomofocusState;
+    //     Self { state: PomofocusState::None, counter: None, max_count: Some(3)
+    // } }
 
     fn next_counter(&mut self) {
         match self.get_state() {
@@ -430,11 +406,13 @@ pub struct PomoFocusCli {
     #[arg(short = 'w', long = "work", default_value_t = DEFAULT_WORK_TIME)]
     work_time: u64,
 
-    /// Sets the length of short break in minutes after each work period elapses.
+    /// Sets the length of short break in minutes after each work period
+    /// elapses.
     #[arg(short = 's', long = "shortbreak", default_value_t = DEFAULT_SHORT_BREAK_TIME)]
     short_break_time: u64,
 
-    /// Sets the length of long break in minutes after all work period completes.
+    /// Sets the length of long break in minutes after all work period
+    /// completes.
     #[arg(short = 'l', long = "longbreak", default_value_t = DEFAULT_LONG_BREAK_TIME)]
     long_break_time: u64,
 
@@ -578,22 +556,10 @@ mod tbd {
 pub mod printer {
     use std::{
         io,
-        io::{
-            BufRead,
-            BufReader,
-            Read,
-            Write,
-        },
+        io::{BufRead, BufReader, Read, Write},
     };
 
-    use termcolor::{
-        BufferWriter,
-        Color,
-        ColorChoice,
-        ColorSpec,
-        StandardStream,
-        WriteColor,
-    };
+    use termcolor::{BufferWriter, Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
     // TODO: Add stdio stdout feature.
     // pub struct CliPrinter<W:Write,R:Read>(W,R);
@@ -678,4 +644,64 @@ pub mod printer {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
     Ok(self)
+} */
+
+//
+// NOTES
+// /
+//
+//
+//
+/* pub fn manage_state(&mut self) {
+    let state = &mut self.state;
+    let counter = &mut self.counter;
+    let max_count = self.max_count;
+    /*
+     * max_count by default = 3 // 3 occurrences of PomofocusState::Work
+     * self.new(); // Default state is PomofocusState::None
+     *   (counter, state) = (None, PomofocusState:None)
+     *
+     * If the next state is PomofocusState::Work then increase counter.
+     * If the counter is set, then we are in a session.
+     * self.next()
+     * self.next_counter() -> counter += 1u8
+     * PomofocusState::None => PomofocusState::Work,
+     *   (counter, state) = (Some(0), PomofocusState:Work)
+     *
+     * Now work timer elapses
+     * self.next()
+     * self.next_counter() -> counter += 0u8;
+     *   PomofocusState::Work => PomofocusState::ShortBreak,
+     *   (counter, state) = (Some(0), PomofocusState:ShortBreak)
+     *
+     * Now short break timer elapses
+     * self.next_counter() -> counter += 1u8
+     * self.next();
+     *   (counter, state) = (Some(1), PomofocusState:Work)
+     *
+     * Now work timer elapses
+     * self.next()
+     * self.next_counter() -> counter += 0u8;
+     *   PomofocusState::Work => PomofocusState::ShortBreak,
+     *   (counter, state) = (Some(1), PomofocusState:ShortBreak)
+     *
+     * Now short break timer elapses
+     * self.next_counter() -> counter += 1u8
+     * self.next();
+     *   (counter, state) = (Some(2), PomofocusState:Work)
+     *
+     * !Max count has been reached [0, 1, 2].count() = 3;
+     * So time for LongBreak
+     * Now work timer elapses
+     * self.next()
+     * self.next_counter() -> counter += 0u8;
+     *   PomofocusState::Work => PomofocusState::LongBreak, // unpresentable state. have to do manually for now.
+     *   (counter, state) = (Some(2), PomofocusState:LongBreak)
+     *
+     * Reset State
+     * self.reset()
+     *   (counter, state) = (None, PomofocusState:None)
+     *
+
+    */
 } */
