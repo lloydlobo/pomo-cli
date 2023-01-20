@@ -68,31 +68,120 @@ struct StateManager {
     max_count: Option<u16>,
 }
 
-impl StateManager {
-    fn new() -> Self {
-        type Item = PomofocusState;
+/* pub fn manage_state(&mut self) {
+    let state = &mut self.state;
+    let counter = &mut self.counter;
+    let max_count = self.max_count;
+    /*
+     * max_count by default = 3 // 3 occurrences of PomofocusState::Work
+     * self.new(); // Default state is PomofocusState::None
+     *   (counter, state) = (None, PomofocusState:None)
+     *
+     * If the next state is PomofocusState::Work then increase counter.
+     * If the counter is set, then we are in a session.
+     * self.next()
+     * self.next_counter() -> counter += 1u8
+     * PomofocusState::None => PomofocusState::Work,
+     *   (counter, state) = (Some(0), PomofocusState:Work)
+     *
+     * Now work timer elapses
+     * self.next()
+     * self.next_counter() -> counter += 0u8;
+     *   PomofocusState::Work => PomofocusState::ShortBreak,
+     *   (counter, state) = (Some(0), PomofocusState:ShortBreak)
+     *
+     * Now short break timer elapses
+     * self.next_counter() -> counter += 1u8
+     * self.next();
+     *   (counter, state) = (Some(1), PomofocusState:Work)
+     *
+     * Now work timer elapses
+     * self.next()
+     * self.next_counter() -> counter += 0u8;
+     *   PomofocusState::Work => PomofocusState::ShortBreak,
+     *   (counter, state) = (Some(1), PomofocusState:ShortBreak)
+     *
+     * Now short break timer elapses
+     * self.next_counter() -> counter += 1u8
+     * self.next();
+     *   (counter, state) = (Some(2), PomofocusState:Work)
+     *
+     * !Max count has been reached [0, 1, 2].count() = 3;
+     * So time for LongBreak
+     * Now work timer elapses
+     * self.next()
+     * self.next_counter() -> counter += 0u8;
+     *   PomofocusState::Work => PomofocusState::LongBreak, // unpresentable state. have to do manually for now.
+     *   (counter, state) = (Some(2), PomofocusState:LongBreak)
+     *
+     * Reset State
+     * self.reset()
+     *   (counter, state) = (None, PomofocusState:None)
+     *
 
-        Self { state: PomofocusState::Work, counter: None, max_count: Some(3) }
-    }
-    fn next(&mut self) {
+    */
+} */
+impl StateManager {
+    fn check_next_state(&mut self) -> PomofocusState {
         let next_state = match self.state {
             PomofocusState::Work => PomofocusState::ShortBreak,
             PomofocusState::ShortBreak => PomofocusState::Work,
-            PomofocusState::LongBreak => PomofocusState::Work,
+            PomofocusState::LongBreak => PomofocusState::None,
             PomofocusState::None => PomofocusState::Work,
         };
-        self.state = next_state;
+        next_state
+        // self.state = next_state;
     }
     fn get_state(&mut self) -> PomofocusState {
         self.state.to_owned()
     }
-    fn next_counter(&mut self) {
-        self.counter = Some(self.counter.unwrap_or(0) + 1);
-        self.next();
+    fn is_state_longbreak(&mut self) -> bool {
+        match self.get_state() {
+            PomofocusState::LongBreak => true,
+            _ => false,
+            // PomofocusState::LongBreak => { self.state = PomofocusState::None; }
+            // _ => {}
+            // PomofocusState::Work | PomofocusState::ShortBreak | PomofocusState::None => todo!(),
+        }
     }
+
+    fn new() -> Self {
+        type Item = PomofocusState;
+        Self { state: PomofocusState::None, counter: None, max_count: Some(3) }
+    }
+
+    fn next_counter(&mut self) {
+        match self.get_state() {
+            PomofocusState::Work => {
+                self.counter = Some(self.counter.unwrap_or(0) + 1);
+            }
+            // PomofocusState::ShortBreak | PomofocusState::LongBreak => (), //1 --> THIS
+            // PomofocusState::None => { self.counter = None; } //1 --> THIS?
+            PomofocusState::ShortBreak | PomofocusState::LongBreak | PomofocusState::None => (), /* 2 --> OR THIS? */
+        }
+        // self.counter = Some(self.counter.unwrap_or(0) + 1);
+        // self.next();
+    }
+
+    fn reset(&mut self) {
+        let is_curr_longbreak = self.is_state_longbreak();
+        let is_next_none =
+            if let PomofocusState::None = self.check_next_state() { true } else { false };
+        assert_eq!(is_curr_longbreak, is_next_none); // then reset.
+                                                     //
+        self.state = PomofocusState::None;
+        self.counter = None;
+    }
+
     fn reset_counter(&mut self) {
         self.counter = None;
     }
+
+    pub fn set_next_state(&mut self) {
+        self.state = self.check_next_state();
+        self.state_message().expect("StateManager::set_next_state: state_message() failed");
+    }
+
     fn state_message(&self) -> Result<String, Box<dyn std::error::Error>> {
         match self.state {
             PomofocusState::Work => {
@@ -112,41 +201,6 @@ impl StateManager {
             }
             PomofocusState::None => Ok(String::new()),
         }
-    }
-    fn run(&mut self) -> miette::Result<&mut StateManager> {
-        // let mut manager = StateManager::new();
-        // let mut manager = StateManager::new();
-        // let mut shell = Shell::new();
-        // let mut notification = Notification::new() .summary("Pomofocus") .body("")
-        // .timeout(std::time::Duration::from_secs(5));
-
-        'l: loop {
-            let state = self.get_state();
-            let _counter = self.counter.unwrap_or(0);
-            #[rustfmt::skip]
-            let message = match state {
-                PomofocusState::Work => {// notification .body(&format!("Work {}", counter)) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus Work", "Work") .run()?;
-                    "Work"
-                }
-                PomofocusState::ShortBreak => {// notification .body(&format!("Short Break {}", counter)) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus Short Break", "Short Break") .run()?;
-                    "Short Break"
-                }
-                PomofocusState::LongBreak => {// notification .body(&format!("Long Break {}", counter)) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus Long Break", "Long Break") .run()?;
-                    "Long Break"
-                }
-                PomofocusState::None => {// notification .body(&format!("No Pomofocus")) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus No Pomofocus", "No Pomofocus") .run()?;
-                    "No Pomofocus"
-                }
-            };
-            self.next_counter();
-            println!("{}", message);
-            if self.counter == self.max_count {
-                break 'l;
-            }
-
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        }
-        Ok(self)
     }
 }
 
@@ -482,3 +536,39 @@ pub mod printer {
         }
     }
 }
+
+/* fn run(&mut self) -> miette::Result<&mut StateManager> {
+    // let mut manager = StateManager::new();
+    // let mut manager = StateManager::new();
+    // let mut shell = Shell::new();
+    // let mut notification = Notification::new() .summary("Pomofocus") .body("")
+    // .timeout(std::time::Duration::from_secs(5));
+
+    'l: loop {
+        let state = self.get_state();
+        let _counter = self.counter.unwrap_or(0);
+        #[rustfmt::skip]
+        let message = match state {
+            PomofocusState::Work => {// notification .body(&format!("Work {}", counter)) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus Work", "Work") .run()?;
+                "Work"
+            }
+            PomofocusState::ShortBreak => {// notification .body(&format!("Short Break {}", counter)) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus Short Break", "Short Break") .run()?;
+                "Short Break"
+            }
+            PomofocusState::LongBreak => {// notification .body(&format!("Long Break {}", counter)) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus Long Break", "Long Break") .run()?;
+                "Long Break"
+            }
+            PomofocusState::None => {// notification .body(&format!("No Pomofocus")) .timeout(Duration::seconds(5)) .show()?; cmd!("notify-send", "-t", "5000", "Pomofocus No Pomofocus", "No Pomofocus") .run()?;
+                "No Pomofocus"
+            }
+        };
+        self.next_counter();
+        println!("{}", message);
+        if self.counter == self.max_count {
+            break 'l;
+        }
+
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    Ok(self)
+} */
