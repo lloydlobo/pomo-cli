@@ -7,7 +7,7 @@
 
 mod error;
 
-use std::{error::Error, f32::consts::E};
+use std::{error::Error, f32::consts::E, ops::Sub};
 
 use chrono::{DateTime, Duration, Utc};
 use clap::{command, Parser, Subcommand};
@@ -35,13 +35,14 @@ impl App {
     }
 
     pub async fn run(&mut self) -> miette::Result<()> {
-        let notification_mangaer = match (&mut self.cli.command) {
+        db::run().unwrap();
+        let notification_manager = match (&mut self.cli.command) {
             Some(cmd) => match cmd {
                 CliCommands::Interactive | CliCommands::I => Some(dialoguer_main(&self.cli)?),
             },
             None => None,
         };
-        if let Some(arg) = notification_mangaer {
+        if let Some(arg) = notification_manager {
             self.cli.work_time = arg.work_time as u64;
             self.cli.short_break_time = arg.short_break_time as u64;
         };
@@ -62,8 +63,31 @@ impl App {
             &mut self.state_manager.set_next_state();
             match &mut &mut self.state_manager.get_state() {
                 PomofocusState::Work => {
+                    let created_at = Utc::now();
                     let work_time = self.cli.work_time;
                     Self::prog(work_time);
+                    let work_expired_at = created_at + Duration::minutes(work_time as i64);
+                    let break_expired_at = work_expired_at + Duration::minutes(work_time as i64);
+                    notify_desktop(NotificationManager {
+                        id: None,
+                        description: "werk werk".into(),
+                        work_time: self.cli.work_time as u16,
+                        short_break_time: self.cli.short_break_time as u16,
+                        long_break_time: self.cli.long_break_time as u16,
+                        created_at,
+                        work_expired_at: Some(work_expired_at),
+                        break_expired_at: Some(break_expired_at),
+                        body: format!(
+                            "{}{}{}",
+                            created_at,
+                            work_time,
+                            work_expired_at.sub(created_at)
+                        ),
+                        icon: "alarm",
+                        timeout: 2000,
+                        appname: "pompom".into(),
+                    })
+                    .unwrap();
                     &mut self.state_manager.next_counter();
                 }
                 PomofocusState::ShortBreak => {
@@ -157,14 +181,14 @@ async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
         let break_expired_at = work_expired_at + Duration::minutes(cli.short_break_time as i64);
         let id = 1;
         let args = NotificationManager {
-            id,
+            id: Some(id),
             description: String::from("Work session over"),
             work_time: cli.work_time as u16,
             short_break_time: cli.short_break_time as u16,
             long_break_time: cli.long_break_time as u16,
             created_at,
-            work_expired_at,
-            break_expired_at,
+            work_expired_at: Some(work_expired_at),
+            break_expired_at: Some(break_expired_at),
             body: format!("{:#?},{}", id, work_expired_at),
             icon: "alarm",
             timeout: 2000,
@@ -430,14 +454,14 @@ impl PomoFocusCli {
 
 #[derive(Debug)]
 pub struct NotificationManager {
-    id: u16,
+    id: Option<u16>,
     description: String,
     work_time: u16,
     short_break_time: u16,
     long_break_time: u16,
     created_at: DateTime<Utc>,
-    work_expired_at: DateTime<Utc>,
-    break_expired_at: DateTime<Utc>,
+    work_expired_at: Option<DateTime<Utc>>,
+    break_expired_at: Option<DateTime<Utc>>,
     body: String,
     icon: &'static str,
     /// In milliseconds
@@ -458,14 +482,14 @@ pub fn dialoguer_main(cli: &PomoFocusCli) -> miette::Result<NotificationManager>
     let break_expired_at = work_expired_at + Duration::minutes(cli.short_break_time as i64);
 
     let mut args = NotificationManager {
-        id,
+        id: Some(id),
         description: String::from("Work session over"),
         work_time: cli.work_time as u16,
         short_break_time: cli.short_break_time as u16,
         long_break_time: cli.long_break_time as u16,
         created_at,
-        work_expired_at,
-        break_expired_at,
+        work_expired_at: Some(work_expired_at),
+        break_expired_at: Some(break_expired_at),
         body: format!("{:#?},{}", id, work_expired_at),
         icon: "alarm",
         timeout: 2000,
@@ -694,3 +718,41 @@ pub mod printer {
 
     */
 } */
+
+pub mod db {
+    use rusqlite::{Connection, Result, Statement};
+
+    #[derive(Debug)]
+    struct Person {
+        id: i32,
+        name: String,
+        data: Option<Vec<u8>>,
+    }
+
+    pub fn run() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+
+        conn.execute(
+            "CREATE TABLE person (
+                id      INTEGER PRIMARY KEY,
+                name    TEXT NOT NULL,
+                data    BLOB
+                )",
+            (), // empty list of parameters
+        )?;
+
+        let me = Person { id: 0, name: "John".to_string(), data: None };
+        conn.execute("INSERT INTO person (name, data) VALUES (?1, ?2)", (&me.name, &me.data))?;
+
+        let mut stmt: Statement<'_> = conn.prepare("SELECT id, name, data FROM person")?;
+        let person_iter = stmt.query_map([], |row| {
+            Ok(Person { id: row.get(0)?, name: row.get(1)?, data: row.get(2)? })
+        })?;
+
+        for person in person_iter {
+            println!("Found person {:?}", person?);
+        }
+
+        Ok(())
+    }
+}
