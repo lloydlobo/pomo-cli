@@ -26,12 +26,21 @@ d:
 default:
   just --list
 
+# Format code with rustfmt
 f:
   cargo fmt
+
+# Install binary to OS path
+install:
+  cargo install --path .
 
 # Run bin from pompom/src/bin/pompom.rs
 r:
   cargo r -p pompom
+
+# Run bin cli with `interactive` command from pompom/src/bin/pompom.rs
+r-i:
+  cargo r -p pompom i
 
 # Run bin from pompom/src/bin/pompom.rs in release mode
 rr:

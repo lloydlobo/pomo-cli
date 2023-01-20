@@ -4,6 +4,7 @@
     "cSpell.words": [
         "chrono",
         "crossterm",
+        "dialoguer",
         "humantime",
         "indicatif",
         "longbreak",

@@ -36,12 +36,16 @@ use xshell::{
 
 pub struct Cli {}
 
-pub async fn run(cli: PomoFocusCli) -> miette::Result<()> {
-    if let Some(x) = &cli.command {
-        match x {
-            CliCommands::Interactive | CliCommands::I => dialoguer_main(),
-        }
-    };
+pub async fn run(mut cli: PomoFocusCli) -> miette::Result<()> {
+    if let Some(arg) = match &cli.command {
+        Some(cmd) => match cmd {
+            CliCommands::Interactive | CliCommands::I => Some(dialoguer_main(&cli)?),
+        },
+        None => None,
+    } {
+        cli.work_time = arg.work_time as u64;
+        cli.short_break_time = arg.break_time as u64;
+    }
 
     let spinner = indicatif::ProgressBar::new_spinner();
     let interval = std::time::Duration::from_millis(1000);
@@ -74,7 +78,7 @@ async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
     let every_n_minute = |m: u64| m * 60;
     let if_elapsed_spd_say = |i: &u64| match (i) % every_n_minute(5) == 0 && *i != 0 {
         //TODO: Instead of spd-say, use rust_notify::Notification.
-        true => Some(format!("{} minute over", i / 60)),
+        true => Some(format!("{} minutes over", i / 60)),
         false => None,
     };
     (0..len_duration).for_each(|i: u64| {
@@ -145,6 +149,8 @@ const DEFAULT_LONG_BREAK_TIME: u64 = 25;
 
 /// `pompom` CLI terminal flags with settings.
 /// By default, this will only report errors.
+/// Press `Crl+z` to pause & go to background.
+/// `$ fg` to return back to foreground.
 /// `verbose: Verbosity::new(1, 0),` -> show warnings , output not silenced.
 // [See](https://github.com/clap-rs/clap/blob/master/examples/git-derive.rs)
 #[derive(Parser, Debug, Clone)] // requires `derive` feature
@@ -206,47 +212,38 @@ pub struct NotificationManager {
 }
 
 // TODO: Return or modify or parse Cli clap args.
-pub fn dialoguer_main() {
-    let input: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Your name")
-        .interact_text()
+pub fn dialoguer_main(cli: &PomoFocusCli) -> miette::Result<NotificationManager> {
+    let created_at: DateTime<Utc> = Utc::now();
+    let id = 1;
+    let work_expired_at = created_at + Duration::minutes(cli.work_time as i64);
+    let break_expired_at = work_expired_at + Duration::minutes(cli.short_break_time as i64);
+    let mut args = NotificationManager {
+        id,
+        description: String::from("Work session over"),
+        work_time: cli.work_time as u16,
+        break_time: cli.short_break_time as u16,
+        created_at,
+        work_expired_at,
+        break_expired_at,
+        body: format!("{:#?},{}", id, work_expired_at),
+        icon: "alarm",
+        timeout: 2000,
+        appname: "pompom",
+    };
+
+    let work_time: u16 = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Enter work time")
+        .interact()
+        .unwrap();
+    let break_time: u16 = Input::with_theme(&ColorfulTheme::default())
+        .with_prompt("Enter break time")
+        .interact()
         .unwrap();
 
-    println!("Hello {}!", input);
+    args.work_time = work_time;
+    args.break_time = break_time;
 
-    let mail: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Your email")
-        .validate_with({
-            let mut force = None;
-            move |input: &String| -> Result<(), &str> {
-                if input.contains('@') || force.as_ref().map_or(false, |old| old == input) {
-                    Ok(())
-                } else {
-                    force = Some(input.clone());
-                    Err("This is not a mail address; type the same value again to force use")
-                }
-            }
-        })
-        .interact_text()
-        .unwrap();
-
-    println!("Email: {}", mail);
-
-    let mail: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Your planet")
-        .default("Earth".to_string())
-        .interact_text()
-        .unwrap();
-
-    println!("Planet: {}", mail);
-
-    let mail: String = Input::with_theme(&ColorfulTheme::default())
-        .with_prompt("Your galaxy")
-        .with_initial_text("Milky Way".to_string())
-        .interact_text()
-        .unwrap();
-
-    println!("Galaxy: {}", mail);
+    Ok(args)
 }
 
 pub fn dialoguer_main_bak() {
@@ -290,16 +287,6 @@ pub fn dialoguer_main_bak() {
         .unwrap();
 
     println!("Galaxy: {}", mail);
-}
-
-fn notify_intervals(i: u64, repeat: u64, minute: u64, sh: &Shell) {
-    if i % (repeat * minute) == 0 && i != 0 {
-        if i <= 60 {
-            notify_elapsed_time(sh, Some(format!("{} minute over", i / 60)));
-        } else {
-            notify_elapsed_time(sh, Some(format!("{} minutes over", i / 60)));
-        }
-    }
 }
 
 /// `$ spd-say "'$val' session done"`
