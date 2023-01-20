@@ -3,6 +3,7 @@
 )]
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
+#![allow(unused)]
 
 mod error;
 
@@ -45,8 +46,118 @@ use xshell::{
     Shell,
 };
 
+#[derive(Debug)]
+pub struct App {
+    pub cli: PomoFocusCli,
+    pub state_manager: StateManager,
+}
+
+impl App {
+    pub fn new(cli: PomoFocusCli) -> Self {
+        let mut state_manager = StateManager::new();
+        state_manager.max_count = Some(cli.cycles);
+        Self { cli, state_manager }
+    }
+
+    pub async fn run(&mut self) -> miette::Result<()> {
+        if let Some(arg) = match &mut self.cli.command {
+            Some(cmd) => match cmd {
+                CliCommands::Interactive | CliCommands::I => Some(dialoguer_main(&self.cli)?),
+            },
+            None => None,
+        } {
+            self.cli.work_time = arg.work_time as u64;
+            self.cli.short_break_time = arg.short_break_time as u64;
+        }
+        self.run_timer_sequence().await.map(|_| ()).map_err(|_| NotificationError::Desktop);
+
+        Ok(())
+    }
+    async fn run_timer_sequence(&self) -> NotifyResult {
+        let sh = Shell::new().expect("Shell::new() failed");
+        let len_duration: u64 = self.cli.work_time * 60;
+        let duration_sec = std::time::Duration::from_millis(1000); // default to 1000ms as 1sec.
+        let pb = indicatif::ProgressBar::new(len_duration);
+        (0..len_duration).for_each(|_| {
+            pb.inc(1);
+            std::thread::sleep(duration_sec);
+        });
+        pb.finish_with_message("Pomodoro finished! Take a break!");
+        Ok(())
+    }
+}
+pub async fn run(mut cli: PomoFocusCli) -> miette::Result<()> {
+    if let Some(arg) = match &cli.command {
+        Some(cmd) => match cmd {
+            CliCommands::Interactive | CliCommands::I => Some(dialoguer_main(&cli)?),
+        },
+        None => None,
+    } {
+        cli.work_time = arg.work_time as u64;
+        cli.short_break_time = arg.short_break_time as u64;
+    }
+    let _res = run_timer(cli).await.map(|_| ()).map_err(|_| NotificationError::Desktop);
+    Ok(())
+}
+
+async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
+    let sh = Shell::new().expect("Shell::new() failed");
+    let len_duration: u64 = cli.work_time * 60;
+    let pb = indicatif::ProgressBar::new(len_duration);
+
+    let created_at: DateTime<Utc> = Utc::now();
+    let duration_sec = std::time::Duration::from_millis(1000); // default to 1000ms as 1sec.
+                                                               //
+    let arg_duration_work = Some(cli.work_time.to_string());
+    cmd!(sh, "echo {arg_duration_work...} minutes").run().unwrap();
+
+    let every_n_minute = |m: u64| m * 60;
+    let if_elapsed_spd_say = |i: &u64| match (i) % every_n_minute(5) == 0 && *i != 0 {
+        //TODO: Instead of spd-say, use rust_notify::Notification.
+        true => Some(format!("{} minutes over", i / 60)),
+        false => None,
+    };
+
+    // Main pomodoro progress loop!
+    (0..len_duration).for_each(|i: u64| {
+        pb.inc(1);
+        // TODO: Move conditional here to avoid invoking notification for `None` cases.
+        notify_elapsed_time(&sh, if_elapsed_spd_say(&i));
+        std::thread::sleep(duration_sec);
+    });
+    pb.finish_with_message("Pomodoro finished! Take a break!");
+
+    {
+        let args = vec!["5", "5"];
+        let arg_user_session_done: Option<String> = Some(format!("{} session done", &args[1]));
+        cmd!(sh, "spd-say -t female1 {arg_user_session_done...}").run().unwrap();
+        // `$ spd-say "'$val' session done"`
+    }
+    {
+        let work_expired_at = created_at + Duration::minutes(cli.work_time as i64);
+        let break_expired_at = work_expired_at + Duration::minutes(cli.short_break_time as i64);
+        let id = 1;
+        let args = NotificationManager {
+            id,
+            description: String::from("Work session over"),
+            work_time: cli.work_time as u16,
+            short_break_time: cli.short_break_time as u16,
+            long_break_time: cli.long_break_time as u16,
+            created_at,
+            work_expired_at,
+            break_expired_at,
+            body: format!("{:#?},{}", id, work_expired_at),
+            icon: "alarm",
+            timeout: 2000,
+            appname: "pompom",
+        };
+
+        notify_desktop(args)
+    }
+}
+
 #[derive(Debug, Clone)]
-enum PomofocusState {
+pub enum PomofocusState {
     Work,
     ShortBreak,
     LongBreak,
@@ -62,10 +173,10 @@ enum PomofocusState {
 /// work state 3
 /// long break state
 #[derive(Debug)]
-struct StateManager {
-    state: PomofocusState,
-    counter: Option<u16>,
-    max_count: Option<u16>,
+pub struct StateManager {
+    pub state: PomofocusState,
+    pub counter: Option<u16>,
+    pub max_count: Option<u16>,
 }
 
 /* pub fn manage_state(&mut self) {
@@ -155,8 +266,11 @@ impl StateManager {
             PomofocusState::Work => {
                 self.counter = Some(self.counter.unwrap_or(0) + 1);
             }
-            // PomofocusState::ShortBreak | PomofocusState::LongBreak => (), //1 --> THIS
-            // PomofocusState::None => { self.counter = None; } //1 --> THIS?
+            PomofocusState::ShortBreak | PomofocusState::LongBreak => (), /* 1 --> THIS */
+            // PomofocusState::None
+            // => { self.counter =
+            // None; } //1 -->
+            // THIS?
             PomofocusState::ShortBreak | PomofocusState::LongBreak | PomofocusState::None => (), /* 2 --> OR THIS? */
         }
         // self.counter = Some(self.counter.unwrap_or(0) + 1);
@@ -204,76 +318,6 @@ impl StateManager {
     }
 }
 
-pub async fn run(mut cli: PomoFocusCli) -> miette::Result<()> {
-    if let Some(arg) = match &cli.command {
-        Some(cmd) => match cmd {
-            CliCommands::Interactive | CliCommands::I => Some(dialoguer_main(&cli)?),
-        },
-        None => None,
-    } {
-        cli.work_time = arg.work_time as u64;
-        cli.short_break_time = arg.short_break_time as u64;
-    }
-    let _res = run_timer(cli).await.map(|_| ()).map_err(|_| NotificationError::Desktop);
-    Ok(())
-}
-
-async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
-    let sh = Shell::new().expect("Shell::new() failed");
-    let len_duration: u64 = cli.work_time * 60;
-    let pb = indicatif::ProgressBar::new(len_duration);
-
-    let created_at: DateTime<Utc> = Utc::now();
-    let interval = std::time::Duration::from_millis(1000); // default to 1000ms as 1sec.
-                                                           //
-    let arg_duration_work = Some(cli.work_time.to_string());
-    cmd!(sh, "echo {arg_duration_work...} minutes").run().unwrap();
-
-    let every_n_minute = |m: u64| m * 60;
-    let if_elapsed_spd_say = |i: &u64| match (i) % every_n_minute(5) == 0 && *i != 0 {
-        //TODO: Instead of spd-say, use rust_notify::Notification.
-        true => Some(format!("{} minutes over", i / 60)),
-        false => None,
-    };
-
-    // Main pomodoro progress loop!
-    (0..len_duration).for_each(|i: u64| {
-        pb.inc(1);
-        // TODO: Move conditional here to avoid invoking notification for `None` cases.
-        notify_elapsed_time(&sh, if_elapsed_spd_say(&i));
-        std::thread::sleep(interval);
-    });
-    pb.finish_with_message("Pomodoro finished! Take a break!");
-
-    {
-        let args = vec!["5", "5"];
-        let arg_user_session_done: Option<String> = Some(format!("{} session done", &args[1]));
-        cmd!(sh, "spd-say -t female1 {arg_user_session_done...}").run().unwrap();
-        // `$ spd-say "'$val' session done"`
-    }
-    {
-        let work_expired_at = created_at + Duration::minutes(cli.work_time as i64);
-        let break_expired_at = work_expired_at + Duration::minutes(cli.short_break_time as i64);
-        let id = 1;
-        let args = NotificationManager {
-            id,
-            description: String::from("Work session over"),
-            work_time: cli.work_time as u16,
-            short_break_time: cli.short_break_time as u16,
-            long_break_time: cli.long_break_time as u16,
-            created_at,
-            work_expired_at,
-            break_expired_at,
-            body: format!("{:#?},{}", id, work_expired_at),
-            icon: "alarm",
-            timeout: 2000,
-            appname: "pompom",
-        };
-
-        notify_desktop(args)
-    }
-}
-
 fn notify_desktop(args: NotificationManager) -> Result<(), NotificationError> {
     let mut notification = Notification::new();
     let notification = notification
@@ -305,6 +349,7 @@ pub enum CliCommands {
 const DEFAULT_WORK_TIME: u64 = 15;
 const DEFAULT_SHORT_BREAK_TIME: u64 = 5;
 const DEFAULT_LONG_BREAK_TIME: u64 = 25;
+const DEFAULT_WORK_CYCLES: u16 = 3;
 
 /// `pompom` CLI terminal flags with settings.
 /// By default, this will only report errors.
@@ -335,6 +380,10 @@ pub struct PomoFocusCli {
     /// Sets the length of long break in minutes after all work period completes.
     #[arg(short = 'l', long = "longbreak", default_value_t = DEFAULT_LONG_BREAK_TIME)]
     long_break_time: u64,
+
+    /// Sets the count of work cycles before a long break starts. Default: 3.
+    #[arg(short = 'c', long = "cycles", default_value_t = DEFAULT_WORK_CYCLES)]
+    cycles: u16,
 }
 
 impl Default for PomoFocusCli {
@@ -350,6 +399,7 @@ impl PomoFocusCli {
             short_break_time: DEFAULT_SHORT_BREAK_TIME,
             long_break_time: DEFAULT_LONG_BREAK_TIME,
             verbose: Verbosity::new(1, 0),
+            cycles: DEFAULT_WORK_CYCLES,
         }
     }
 }
