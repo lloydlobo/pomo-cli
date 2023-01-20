@@ -87,17 +87,18 @@ impl App {
         Ok(())
     }
     async fn run_timer_sequence(&mut self) -> NotifyResult {
-        let m = &mut self.state_manager;
+        // let m = &mut self.state_manager;
         let cycles_requested: u16 = self.cli.cycles;
         dbg!(&cycles_requested);
         let mut counter = 0;
         for i in (1..=cycles_requested) {
             // dbg!(&m.get_state());
             // dbg!(m.check_next_state());
-            let curr_state = m.get_state();
-            m.next_counter();
-            m.set_next_state();
-            match curr_state {
+            // let curr_state = m.get_state();
+            &mut self.state_manager.set_next_state();
+            &mut self.state_manager.next_counter();
+
+            match &mut &mut self.state_manager.get_state() {
                 PomofocusState::Work => {
                     let work_time = self.cli.work_time;
                     Self::prog(work_time);
@@ -110,11 +111,21 @@ impl App {
                     let work_time = self.cli.long_break_time;
                     Self::prog(work_time);
                 }
-                PomofocusState::None => {}
+                PomofocusState::None => {
+                    if self.state_manager.state == PomofocusState::LongBreak {
+                        &mut self.state_manager.reset();
+                        &mut self.state_manager.reset_counter();
+                        // break;
+                    }
+                }
             }
             counter += i;
-            dbg!(&m);
+            dbg!(&self.cli);
+            dbg!(&mut self.state_manager);
         }
+        dbg!(&counter);
+        dbg!(&mut self.state_manager);
+        dbg!(&self.cli);
 
         Ok(())
     }
@@ -202,7 +213,7 @@ async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PomofocusState {
     Work,
     ShortBreak,
