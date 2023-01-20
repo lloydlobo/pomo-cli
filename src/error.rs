@@ -36,12 +36,28 @@ pub enum NotificationError {
     DeletionFail(String),
 }
 
+// impl fmt::Debug for NotificationError {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         match self {
+//             Self::Desktop(arg0) => f.debug_tuple("Desktop").field(arg0).finish(),
+//             Self::EmptyConfiguration => write!(f, "EmptyConfiguration"),
+//             Self::NewNotification(arg0) => f.debug_tuple("NewNotification").field(arg0).finish(),
+//             Self::DeletionFail(arg0) => f.debug_tuple("DeletionFail").field(arg0).finish(),
+//         }
+//     }
+// }
+
 impl From<NotifyRustError> for NotificationError {
     fn from(v: NotifyRustError) -> Self {
         Self::Desktop(v)
     }
 }
 
+/// # impl Display for DataStoreError {
+/// #     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+/// #         unimplemented!()
+/// #     }
+/// # }
 impl fmt::Display for NotificationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -55,6 +71,7 @@ impl fmt::Display for NotificationError {
     }
 }
 
+/// # impl std::error::Error for DataStoreError {}
 impl std::error::Error for NotificationError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {

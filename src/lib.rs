@@ -7,6 +7,11 @@
 
 mod error;
 
+use std::{
+    error::Error,
+    f32::consts::E,
+};
+
 use chrono::{
     DateTime,
     Duration,
@@ -29,6 +34,7 @@ use error::{
     NotifyResult,
     PomodoroError,
 };
+use miette::Diagnostic;
 use notify_rust::{
     Hint,
     Notification,
@@ -49,41 +55,81 @@ use xshell::{
 #[derive(Debug)]
 pub struct App {
     pub cli: PomoFocusCli,
-    pub state_manager: StateManager,
+    state_manager: StateManager,
 }
 
 impl App {
     pub fn new(cli: PomoFocusCli) -> Self {
         let mut state_manager = StateManager::new();
         state_manager.max_count = Some(cli.cycles);
+
         Self { cli, state_manager }
     }
 
     pub async fn run(&mut self) -> miette::Result<()> {
-        if let Some(arg) = match &mut self.cli.command {
+        let notification_mangaer = match (&mut self.cli.command) {
             Some(cmd) => match cmd {
                 CliCommands::Interactive | CliCommands::I => Some(dialoguer_main(&self.cli)?),
             },
             None => None,
-        } {
+        };
+        if let Some(arg) = notification_mangaer {
             self.cli.work_time = arg.work_time as u64;
             self.cli.short_break_time = arg.short_break_time as u64;
+        };
+
+        if let Err(eee) =
+            self.run_timer_sequence().await.map(|_| ()).map_err(|_| NotificationError::Desktop)
+        {
+            unimplemented!()
         }
-        self.run_timer_sequence().await.map(|_| ()).map_err(|_| NotificationError::Desktop);
 
         Ok(())
     }
-    async fn run_timer_sequence(&self) -> NotifyResult {
+    async fn run_timer_sequence(&mut self) -> NotifyResult {
+        let m = &mut self.state_manager;
+        let cycles_requested: u16 = self.cli.cycles;
+        dbg!(&cycles_requested);
+        let mut counter = 0;
+        for i in (1..=cycles_requested) {
+            // dbg!(&m.get_state());
+            // dbg!(m.check_next_state());
+            let curr_state = m.get_state();
+            m.next_counter();
+            m.set_next_state();
+            match curr_state {
+                PomofocusState::Work => {
+                    let work_time = self.cli.work_time;
+                    Self::prog(work_time);
+                }
+                PomofocusState::ShortBreak => {
+                    let work_time = self.cli.short_break_time;
+                    Self::prog(work_time);
+                }
+                PomofocusState::LongBreak => {
+                    let work_time = self.cli.long_break_time;
+                    Self::prog(work_time);
+                }
+                PomofocusState::None => {}
+            }
+            counter += i;
+            dbg!(&m);
+        }
+
+        Ok(())
+    }
+
+    fn prog(work_time: u64) {
         let sh = Shell::new().expect("Shell::new() failed");
-        let len_duration: u64 = self.cli.work_time * 60;
-        let duration_sec = std::time::Duration::from_millis(1000); // default to 1000ms as 1sec.
+        let len_duration: u64 = work_time * 60;
+        let duration_sec = std::time::Duration::from_millis(10);
+        // default to 1000ms as 1sec.
         let pb = indicatif::ProgressBar::new(len_duration);
         (0..len_duration).for_each(|_| {
             pb.inc(1);
             std::thread::sleep(duration_sec);
         });
         pb.finish_with_message("Pomodoro finished! Take a break!");
-        Ok(())
     }
 }
 pub async fn run(mut cli: PomoFocusCli) -> miette::Result<()> {
