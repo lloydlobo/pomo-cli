@@ -71,8 +71,8 @@ async fn run_timer(cli: PomoFocusCli) -> NotifyResult {
     let arg_duration_work = Some(cli.work_time.to_string());
     cmd!(sh, "echo {arg_duration_work...} minutes").run().unwrap();
 
-    let every_minute = |m: u64| m * 60;
-    let if_elapsed_spd_say = |i: &u64| match (i) % every_minute(1) == 0 && *i != 0 {
+    let every_n_minute = |m: u64| m * 60;
+    let if_elapsed_spd_say = |i: &u64| match (i) % every_n_minute(5) == 0 && *i != 0 {
         //TODO: Instead of spd-say, use rust_notify::Notification.
         true => Some(format!("{} minute over", i / 60)),
         false => None,
@@ -205,6 +205,7 @@ pub struct NotificationManager {
     appname: &'static str,
 }
 
+// TODO: Return or modify or parse Cli clap args.
 pub fn dialoguer_main() {
     let input: String = Input::with_theme(&ColorfulTheme::default())
         .with_prompt("Your name")
