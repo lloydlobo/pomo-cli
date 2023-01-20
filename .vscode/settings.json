@@ -5,6 +5,7 @@
         "chrono",
         "crossterm",
         "humantime",
+        "indicatif",
         "longbreak",
         "miette",
         "pomo",
