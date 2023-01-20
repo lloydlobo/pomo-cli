@@ -56,48 +56,37 @@ impl App {
     }
     async fn run_timer_sequence(&mut self) -> NotifyResult {
         // let m = &mut self.state_manager;
-        let cycles_requested: u16 = self.cli.cycles;
-        dbg!(&self.cli);
-        dbg!(&cycles_requested);
-        let mut counter = 0;
-        // while !self.state_manager.is_state_longbreak() {
-        while counter < cycles_requested {
-            // for i in (1..=cycles_requested) {
-            // dbg!(&m.get_state());
-            // dbg!(m.check_next_state());
-            // let curr_state = m.get_state();
+        // dbg!(&self.cli);
+        // dbg!(&cycles_requested);
+        while self.state_manager.counter.unwrap_or(0) < self.cli.cycles {
             &mut self.state_manager.set_next_state();
-            // &mut self.state_manager.next_counter();
-
             match &mut &mut self.state_manager.get_state() {
                 PomofocusState::Work => {
                     let work_time = self.cli.work_time;
                     Self::prog(work_time);
                     &mut self.state_manager.next_counter();
-                    counter += 1;
                 }
                 PomofocusState::ShortBreak => {
                     let work_time = self.cli.short_break_time;
                     Self::prog(work_time);
                 }
-                PomofocusState::LongBreak => {
-                    let work_time = self.cli.long_break_time;
-                    Self::prog(work_time);
-                }
+                PomofocusState::LongBreak => {}
                 PomofocusState::None => {}
             }
-            if self.state_manager.state == PomofocusState::LongBreak {
-                &mut self.state_manager.reset();
-                &mut self.state_manager.reset_counter();
-                // break;
+            if self.state_manager.counter.unwrap() == self.cli.cycles {
+                self.state_manager.state = PomofocusState::LongBreak;
+                let work_time = self.cli.long_break_time;
+                Self::prog(work_time);
+                &mut self.state_manager.set_next_state();
             }
-            // counter += i;
-            dbg!(&mut self.state_manager);
+            // if self.state_manager.state == PomofocusState::LongBreak {
+            // &mut self.state_manager.reset();
+            // &mut self.state_manager.reset_counter();
             // }
+            // dbg!(&mut self.state_manager);
         }
-        dbg!(&counter);
-        dbg!(&mut self.state_manager);
-        dbg!(&self.cli);
+        // dbg!(&mut self.state_manager);
+        // dbg!(&self.cli);
 
         Ok(())
     }
