@@ -47,13 +47,6 @@ pub async fn run(mut cli: PomoFocusCli) -> miette::Result<()> {
         cli.short_break_time = arg.break_time as u64;
     }
 
-    let spinner = indicatif::ProgressBar::new_spinner();
-    let interval = std::time::Duration::from_millis(1000);
-    spinner.enable_steady_tick(interval);
-    std::thread::sleep(std::time::Duration::from_millis(2000));
-    log::debug!("{:?}", spinner.elapsed());
-    spinner.finish();
-
     let _res = run_timer(cli).await.map(|_| ()).map_err(|_| NotificationError::Desktop);
 
     // match res { Ok(v) => Ok(v), Err(_) if Notification::new() .summary("Pompom")
